@@ -149,7 +149,7 @@ validate_dependencies() {
 # Input validation predicates - enhanced
 is_readable_file() { [[ -f "$1" && -r "$1" ]]; }
 is_valid_json()    { jq empty "$1" 2>/dev/null; }
-is_valid_path()    { [[ -n "$1" ]]; }
+is_valid_path()    { [[ -n "$1" && "$1" != *$'\0'* ]]; }
 is_valid_group()   { [[ "$1" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]; }
 is_valid_perms()   { [[ "$1" =~ ^[rwxX-]{1,4}$ ]]; }
 is_valid_mask()    { [[ "$1" =~ ^[rwx-]{1,3}$ ]]; }
