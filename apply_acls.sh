@@ -18,7 +18,8 @@ set -o errtrace
 # CONSTANTS AND CONFIGURATION
 # =============================================================================
 
-readonly SCRIPT_NAME="$(basename "$0")"
+SCRIPT_NAME="$(basename "$0")"
+readonly SCRIPT_NAME
 
 # Exit codes
 readonly EXIT_SUCCESS=0
@@ -26,7 +27,6 @@ readonly EXIT_ERROR=1
 readonly EXIT_INVALID_ARGS=2
 readonly EXIT_MISSING_DEPS=3
 readonly EXIT_FILE_ERROR=4
-readonly EXIT_SKIPPED=5
 
 # Configuration structure - replaces scattered globals
 declare -A CONFIG=(
@@ -54,6 +54,10 @@ readonly -a REQUIRED_COMMANDS=("jq" "setfacl")
 # Central error trap - improved logging
 on_unexpected_error() {
     local -r exit_code="$?" line_no="${BASH_LINENO[0]:-unknown}" command="${BASH_COMMAND}"
+    # Ignore expected return codes from our functions
+    if [[ $exit_code -eq $RETURN_SKIPPED ]]; then
+        return 0
+    fi
     log_error "Unexpected failure on line $line_no (exit code $exit_code)"
     log_error "Failed command: $command"
     exit 1
@@ -107,16 +111,19 @@ init_colors() {
 # Unified logging function
 _log() {
     local -r color="$1" stream="$2" prefix="$3"; shift 3
-    printf "%b%s%s%b\n" "${color_codes[$color]}" "$prefix" "$*" "${color_codes[reset]}" >&"$stream"
+    # Use color codes if available, otherwise plain text
+    local color_start="${color_codes[$color]:-}"
+    local color_end="${color_codes[reset]:-}"
+    printf "%b%s%s%b\n" "$color_start" "$prefix" "$*" "$color_end" >&"$stream"
 }
 
 # Logging functions
-log_info()       { _log blue 1 "INFO: " "$*"; }
-log_success()    { _log green 1 "SUCCESS: " "$*"; }
+log_info()       { _log blue 2 "INFO: " "$*"; }
+log_success()    { _log green 2 "SUCCESS: " "$*"; }
 log_error()      { _log red 2 "ERROR: " "$*"; }
 log_warning()    { _log yellow 2 "WARNING: " "$*"; }
-log_processing() { _log cyan 1 "PROCESSING: " "$*"; }
-log_bold()       { _log bold 1 "" "$*"; }
+log_processing() { _log cyan 2 "PROCESSING: " "$*"; }
+log_bold()       { _log bold 2 "" "$*"; }
 
 # =============================================================================
 # VALIDATION FRAMEWORK - Centralized and extensible
@@ -142,7 +149,7 @@ validate_dependencies() {
 # Input validation predicates - enhanced
 is_readable_file() { [[ -f "$1" && -r "$1" ]]; }
 is_valid_json()    { jq empty "$1" 2>/dev/null; }
-is_valid_path()    { [[ -n "$1" && "$1" != *$'\0'* ]]; }
+is_valid_path()    { [[ -n "$1" ]]; }
 is_valid_group()   { [[ "$1" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]; }
 is_valid_perms()   { [[ "$1" =~ ^[rwxX-]{1,4}$ ]]; }
 is_valid_mask()    { [[ "$1" =~ ^[rwx-]{1,3}$ ]]; }
@@ -216,7 +223,8 @@ sort_paths_by_depth() {
     while IFS= read -r path; do
         [[ -n "$path" ]] || continue
         # Count directory separators to determine depth
-        local depth=$(tr -cd '/' <<< "$path" | wc -c)
+        local depth
+        depth=$(tr -cd '/' <<< "$path" | wc -c)
         printf '%d\t%s\n' "$depth" "$path"
     done | LC_ALL=C sort -n | cut -f2-
 }
@@ -340,24 +348,6 @@ get_acl_config() {
     printf '%s\n%s\n%s\n' "$group" "$perms" "$recursive"
 }
 
-# Check if path exists and determine recursion strategy
-validate_path_and_recursion() {
-    local -r path="$1" recursive="$2"
-    
-    if [[ ! -e "$path" ]]; then
-        log_info "Path does not exist - skipping"
-        return "$RETURN_SKIPPED"
-    fi
-    
-    # Adjust recursion for non-directories
-    if [[ "$recursive" == "true" && ! -d "$path" ]]; then
-        log_warning "Not a directory - applying non-recursively"
-        echo "false"
-    else
-        echo "$recursive"
-    fi
-    return "$RETURN_SUCCESS"
-}
 
 # Apply ACL to a single path with comprehensive error handling
 apply_acl_to_path() {
@@ -372,8 +362,17 @@ apply_acl_to_path() {
     local -r group="${config[0]}" perms="${config[1]}" recursive="${config[2]}"
 
     # Validate path existence and determine recursion
-    local should_recurse
-    should_recurse=$(validate_path_and_recursion "$path" "$recursive") || return $?
+    if [[ ! -e "$path" ]]; then
+        log_info "Path does not exist - skipping"
+        return "$RETURN_SKIPPED"
+    fi
+    
+    local should_recurse="$recursive"
+    # Adjust recursion for non-directories
+    if [[ "$recursive" == "true" && ! -d "$path" ]]; then
+        log_warning "Not a directory - applying non-recursively"
+        should_recurse="false"
+    fi
 
     # Build and execute setfacl command
     local -r acl_entry="g:${group}:${perms}"
@@ -391,13 +390,15 @@ apply_acls() {
     while IFS= read -r path; do
         [[ -n "$path" ]] || continue
 
+        set +e
         apply_acl_to_path "$path"
         local result=$?
+        set -e
         
         case $result in
-            "$RETURN_SUCCESS") ((success++)) ;;
-            "$RETURN_SKIPPED") ((skipped++)) ;;
-            *) ((failed++)) ;;
+            "$RETURN_SUCCESS") ((success++)) || true ;;
+            "$RETURN_SKIPPED") ((skipped++)) || true ;;
+            *) ((failed++)) || true ;;
         esac
         echo
     done < <(printf '%s\n' "${paths[@]}" | sort_paths_by_depth)
@@ -408,7 +409,11 @@ apply_acls() {
     log_bold "- Skipped: $skipped" 
     log_bold "- Failed: $failed"
 
-    [[ $failed -eq 0 ]]
+    if [[ $failed -eq 0 ]]; then
+        return 0
+    else
+        return 1
+    fi
 }
 
 # =============================================================================
@@ -457,12 +462,20 @@ parse_arguments() {
                 local value
                 value="$(get_option_value "$1" "${2:-}")"
                 set_color_mode "$value"
-                [[ "$1" == *=* ]] && shift || shift 2 ;;
+                if [[ "$1" == *=* ]]; then
+                    shift
+                else
+                    shift 2
+                fi ;;
             --mask|--mask=*)
                 local value
                 value="$(get_option_value "$1" "${2:-}")"
                 configure_mask "$value"
-                [[ "$1" == *=* ]] && shift || shift 2 ;;
+                if [[ "$1" == *=* ]]; then
+                    shift
+                else
+                    shift 2
+                fi ;;
             --no-color)
                 CONFIG[color_mode]="never"
                 shift ;;
