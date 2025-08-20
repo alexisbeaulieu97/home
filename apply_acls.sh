@@ -398,7 +398,9 @@ apply_acls() {
         case $result in
             "$RETURN_SUCCESS") ((success++)) || true ;;
             "$RETURN_SKIPPED") ((skipped++)) || true ;;
-            *) ((failed++)) || true ;;
+            "$RETURN_SUCCESS") ((success++)) ;;
+            "$RETURN_SKIPPED") ((skipped++)) ;;
+            *) ((failed++)) ;;
         esac
         echo
     done < <(printf '%s\n' "${paths[@]}" | sort_paths_by_depth)
