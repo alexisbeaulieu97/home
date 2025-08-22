@@ -554,12 +554,12 @@ apply_rules() {
         [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
 
         for path in "${candidates[@]}"; do
-            path_under_any_filter "$path" || { ((total_skipped++)); continue; }
+            path_under_any_filter "$path" || { total_skipped=$((total_skipped+1)); continue; }
             local is_file=0 is_dir=0
             [[ -f "$path" ]] && is_file=1
             [[ -d "$path" ]] && is_dir=1
-            if (( is_file==1 && want_files==0 )); then ((total_skipped++)); continue; fi
-            if (( is_dir==1 && want_dirs==0 )); then ((total_skipped++)); continue; fi
+            if (( is_file==1 && want_files==0 )); then total_skipped=$((total_skipped+1)); continue; fi
+            if (( is_dir==1 && want_dirs==0 )); then total_skipped=$((total_skipped+1)); continue; fi
 
             local base rel root_for_rel=""
             base="$(basename -- "$path")"
@@ -574,7 +574,7 @@ apply_rules() {
             else
                 if filter_by_patterns "$rel" "$base" "$syntax" "$case_sensitive" "$match_base" "${includes[@]}" -- "${excludes[@]}"; then pass=1; fi
             fi
-            if [[ $pass -ne 1 ]]; then ((total_skipped++)); continue; fi
+            if [[ $pass -ne 1 ]]; then total_skipped=$((total_skipped+1)); continue; fi
 
             local rc=0
             if (( is_file==1 && ${#file_specs[@]} > 0 )); then
@@ -587,7 +587,7 @@ apply_rules() {
                 apply_specs_to_path "$path" "true" "${def_specs[@]}" || rc=1
             fi
 
-            if [[ $rc -eq 0 ]]; then ((total_applied++)); else ((total_failed++)); fi
+            if [[ $rc -eq 0 ]]; then total_applied=$((total_applied+1)); else total_failed=$((total_failed+1)); fi
         done
         echo
     done
