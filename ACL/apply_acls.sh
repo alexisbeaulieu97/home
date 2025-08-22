@@ -48,6 +48,9 @@ declare -A color_codes=()
 declare -i ENTRIES_ATTEMPTED=0
 declare -i ENTRIES_FAILED=0
 
+# Summary rows (tab-separated fields): path, type, attempted, failed, status
+declare -a SUMMARY_ROWS=()
+
 # Required dependencies
 readonly -a REQUIRED_COMMANDS=("jq" "setfacl")
 
@@ -585,6 +588,8 @@ apply_rules() {
             if [[ $pass -ne 1 ]]; then total_skipped=$((total_skipped+1)); continue; fi
 
             local rc=0
+            local attempted_before=$ENTRIES_ATTEMPTED
+            local failed_before=$ENTRIES_FAILED
             if (( is_file==1 && ${#file_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "false" "${file_specs[@]}" || rc=1
             fi
@@ -595,7 +600,17 @@ apply_rules() {
                 apply_specs_to_path "$path" "true" "${def_specs[@]}" || rc=1
             fi
 
-            if [[ $rc -eq 0 ]]; then total_applied=$((total_applied+1)); else total_failed=$((total_failed+1)); fi
+            local attempted_delta=$((ENTRIES_ATTEMPTED - attempted_before))
+            local failed_delta=$((ENTRIES_FAILED - failed_before))
+            local obj_type="file"
+            (( is_dir==1 )) && obj_type="directory"
+            if [[ $rc -eq 0 ]]; then
+                total_applied=$((total_applied+1))
+                SUMMARY_ROWS+=("$path\t$obj_type\t$attempted_delta\t$failed_delta\tAPPLIED")
+            else
+                total_failed=$((total_failed+1))
+                SUMMARY_ROWS+=("$path\t$obj_type\t$attempted_delta\t$failed_delta\tFAILED")
+            fi
         done
         echo
     done
@@ -606,6 +621,17 @@ apply_rules() {
     log_bold "- Paths with failures: $total_failed"
     log_bold "- ACL entries attempted: $ENTRIES_ATTEMPTED"
     log_bold "- ACL entries failed: $ENTRIES_FAILED"
+
+    # Pretty table
+    if [[ ${#SUMMARY_ROWS[@]} -gt 0 ]]; then
+        echo
+        log_bold "Details:"
+        printf "%s\n" "PATH\tTYPE\tENTRIES\tFAILED\tSTATUS" | expand -t 4
+        printf "%s\n" "----\t----\t-------\t------\t------" | expand -t 4
+        for row in "${SUMMARY_ROWS[@]}"; do
+            printf "%s\n" "$row" | expand -t 4
+        done
+    fi
 
     if [[ $total_failed -eq 0 ]]; then return 0; else return 1; fi
 }
