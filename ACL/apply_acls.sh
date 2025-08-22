@@ -162,10 +162,10 @@ validate_definitions_file() {
     is_readable_file "$file" || fail "$EXIT_FILE_ERROR" "Cannot read definitions file '$file'. Check file exists and has read permissions."
     is_valid_json "$file" || fail "$EXIT_FILE_ERROR" "Invalid JSON syntax in '$file'. Use 'jq .' to validate JSON format."
 
-    local path_count
-    path_count=$(jq 'keys | length' "$file" 2>/dev/null) || 
-        fail "$EXIT_FILE_ERROR" "Cannot parse JSON structure from '$file'"
-    [[ "$path_count" -gt 0 ]] || fail "$EXIT_FILE_ERROR" "Definitions file '$file' contains no path definitions"
+    # Validate minimal structure for new schema: object with non-empty rules array
+    local schema_ok
+    schema_ok=$(jq -e '(type=="object") and (has("rules")) and (.rules|type=="array" and length>0)' "$file" 2>/dev/null) || 
+        fail "$EXIT_FILE_ERROR" "Invalid schema in '$file': expected top-level object with non-empty 'rules' array"
 }
 
 # =============================================================================
@@ -195,6 +195,52 @@ get_json_data() {
     else
         fail "$EXIT_ERROR" "JSON query failed for '$file' with filter '$jq_filter': $result"
     fi
+}
+
+# =============================================================================
+# RULES ACCESSORS (new schema)
+# =============================================================================
+
+get_apply_order() {
+    jq -r '.apply_order // "shallow_to_deep"' "${CONFIG[definitions_file]}"
+}
+
+get_rules_count() {
+    jq -r '.rules | length' "${CONFIG[definitions_file]}"
+}
+
+get_rule_roots() {
+    local -r idx="$1"
+    jq -r ".rules[$idx].roots[]" "${CONFIG[definitions_file]}"
+}
+
+get_rule_params_tsv() {
+    local -r idx="$1"
+    jq -r \
+      ".rules[$idx] as $r | [($r.recurse // false), ($r.include_self // true), ((($r.match.types // [\"file\",\"directory\"]) | join(","))), ($r.match.pattern_syntax // \"glob\"), ($r.match.match_base // true), ($r.match.case_sensitive // true), ($r.apply_defaults // false)] | @tsv" \
+      "${CONFIG[definitions_file]}"
+}
+
+# Returns newline-separated setfacl specs for entries of a given type: files|directories
+get_rule_entry_specs() {
+    local -r idx="$1" type="$2"
+    jq -r \
+      ".rules[$idx].entries.$type // [] | .[] | if .kind == \"user\" then \"u:\(.name):\(.perms)\" elif .kind == \"group\" then \"g:\(.name):\(.perms)\" elif .kind == \"owner\" then \"u::\(.perms)\" elif .kind == \"owning_group\" then \"g::\(.perms)\" elif .kind == \"other\" then \"o::\(.perms)\" elif .kind == \"mask\" then \"m::\(.perms)\" else empty end" \
+      "${CONFIG[definitions_file]}"
+}
+
+# Returns newline-separated setfacl specs for default entries (directories only)
+get_rule_default_specs() {
+    local -r idx="$1"
+    jq -r \
+      ".rules[$idx].default_entries // [] | .[] | if .kind == \"user\" then \"u:\(.name):\(.perms)\" elif .kind == \"group\" then \"g:\(.name):\(.perms)\" elif .kind == \"owner\" then \"u::\(.perms)\" elif .kind == \"owning_group\" then \"g::\(.perms)\" elif .kind == \"other\" then \"o::\(.perms)\" elif .kind == \"mask\" then \"m::\(.perms)\" else empty end" \
+      "${CONFIG[definitions_file]}"
+}
+
+# Pattern lists (newline-separated) for include/exclude
+get_rule_patterns() {
+    local -r idx="$1" kind="$2" # kind: include|exclude
+    jq -r ".rules[$idx].match.$kind // [] | .[]" "${CONFIG[definitions_file]}"
 }
 
 # Optimized path operations
@@ -306,6 +352,20 @@ build_setfacl_args() {
     printf '%s\n' "${args[@]}"
 }
 
+# Build setfacl args for a single entry; optionally as default (-d)
+build_setfacl_args_default() {
+    local -r acl_entry="$1" is_default="$2"
+    local -a args=()
+
+    [[ "$is_default" == "true" ]] && args+=("-d")
+    [[ "${CONFIG[no_recalc_mask]}" == "true" ]] && args+=("-n")
+
+    args+=("-m" "$acl_entry")
+    [[ "${CONFIG[mask_setting]}" == "explicit" ]] && args+=("-m" "m::${CONFIG[mask_explicit]}")
+
+    printf '%s\n' "${args[@]}"
+}
+
 # Execute setfacl with comprehensive error handling
 execute_setfacl() {
     local -r path="$1" acl_entry="$2" recursive="$3"
@@ -333,89 +393,195 @@ execute_setfacl() {
 }
 
 # =============================================================================
-# CORE APPLICATION LOGIC - Improved modularity
+# CORE APPLICATION LOGIC - Rule-based engine
 # =============================================================================
 
-# Get and validate ACL configuration for a path
-get_acl_config() {
+path_under_any_filter() {
     local -r path="$1"
-    local -a config
-    
-    mapfile -t config < <(get_path_config "$path")
-    local -r group="${config[0]}" perms="${config[1]}" recursive="${config[2]}"
-    
-    validate_acl_config "$group" "$perms" "$path"
-    printf '%s\n%s\n%s\n' "$group" "$perms" "$recursive"
-}
-
-
-# Apply ACL to a single path with comprehensive error handling
-apply_acl_to_path() {
-    local -r path="$1"
-
-    log_processing "$path"
-    is_valid_path "$path" || fail "$EXIT_ERROR" "Invalid path format: '$path'"
-
-    # Get and validate configuration
-    local -a config
-    mapfile -t config < <(get_acl_config "$path")
-    local -r group="${config[0]}" perms="${config[1]}" recursive="${config[2]}"
-
-    # Validate path existence and determine recursion
-    if [[ ! -e "$path" ]]; then
-        log_info "Path does not exist - skipping"
-        return "$RETURN_SKIPPED"
-    fi
-    
-    local should_recurse="$recursive"
-    # Adjust recursion for non-directories
-    if [[ "$recursive" == "true" && ! -d "$path" ]]; then
-        log_warning "Not a directory - applying non-recursively"
-        should_recurse="false"
-    fi
-
-    # Build and execute setfacl command
-    local -r acl_entry="g:${group}:${perms}"
-    local -a setfacl_args
-    mapfile -t setfacl_args < <(build_setfacl_args "$acl_entry" "$should_recurse")
-
-    execute_setfacl "$path" "$acl_entry" "$should_recurse" "${setfacl_args[@]}"
-}
-
-# Main ACL application orchestrator
-apply_acls() {
-    local -ar paths=("$@")
-    local success=0 failed=0 skipped=0
-
-    while IFS= read -r path; do
-        [[ -n "$path" ]] || continue
-
-        set +e
-        apply_acl_to_path "$path"
-        local result=$?
-        set -e
-        
-        case $result in
-            "$RETURN_SUCCESS") ((success++)) || true ;;
-            "$RETURN_SKIPPED") ((skipped++)) || true ;;
-            "$RETURN_SUCCESS") ((success++)) ;;
-            "$RETURN_SKIPPED") ((skipped++)) ;;
-            *) ((failed++)) ;;
-        esac
-        echo
-    done < <(printf '%s\n' "${paths[@]}" | sort_paths_by_depth)
-
-    # Summary report
-    log_bold "Summary:"
-    log_bold "- Applied: $success"
-    log_bold "- Skipped: $skipped" 
-    log_bold "- Failed: $failed"
-
-    if [[ $failed -eq 0 ]]; then
+    if [[ ${#target_paths[@]} -eq 0 ]]; then
         return 0
-    else
-        return 1
     fi
+    for base in "${target_paths[@]}"; do
+        if [[ "$path" == "$base" || "$path" == $base/* ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+match_glob() {
+    local -r str="$1" base="$2" cs="$3"; shift 3
+    local -a patterns=("$@")
+    local saved=0
+    if shopt -q nocasematch; then saved=1; fi
+    if [[ "$cs" == "false" ]]; then shopt -s nocasematch; else shopt -u nocasematch; fi
+    for pat in "${patterns[@]}"; do
+        [[ -z "$pat" ]] && continue
+        if [[ "$str" == $pat || "$base" == $pat ]]; then
+            (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+            return 0
+        fi
+    done
+    (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+    return 1
+}
+
+match_regex() {
+    local -r str="$1" base="$2" cs="$3"; shift 3
+    local -a patterns=("$@")
+    local flags="-E"
+    [[ "$cs" == "false" ]] && flags="-Ei"
+    for pat in "${patterns[@]}"; do
+        [[ -z "$pat" ]] && continue
+        echo "$str" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
+        echo "$base" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
+    done
+    return 1
+}
+
+filter_by_patterns() {
+    local -r rel="$1" base="$2" syntax="$3" cs="$4"; shift 4
+    local -a includes=() excludes=()
+    local mode="include"
+    for token in "$@"; do
+        if [[ "$token" == "--" ]]; then mode="exclude"; continue; fi
+        if [[ "$mode" == "include" ]]; then includes+=("$token"); else excludes+=("$token"); fi
+    done
+    local ok=1
+    if [[ ${#includes[@]} -eq 0 ]]; then
+        ok=0
+    else
+        if [[ "$syntax" == "glob" ]]; then
+            match_glob "$rel" "$base" "$cs" "${includes[@]}" && ok=0
+        else
+            match_regex "$rel" "$base" "$cs" "${includes[@]}" && ok=0
+        fi
+    fi
+    [[ $ok -ne 0 ]] && return 1
+    if [[ ${#excludes[@]} -gt 0 ]]; then
+        if [[ "$syntax" == "glob" ]]; then
+            match_glob "$rel" "$base" "$cs" "${excludes[@]}" && return 1
+        else
+            match_regex "$rel" "$base" "$cs" "${excludes[@]}" && return 1
+        fi
+    fi
+    return 0
+}
+
+enumerate_candidates_for_rule() {
+    local -r recurse="$1" include_self="$2"; shift 2
+    local -a roots=("$@")
+    for root in "${roots[@]}"; do
+        if [[ ! -e "$root" ]]; then
+            log_warning "Root '$root' does not exist - skipping"
+            continue
+        fi
+        if [[ "$include_self" == "true" ]]; then
+            printf '%s\n' "$root"
+        fi
+        if [[ "$recurse" == "true" && -d "$root" ]]; then
+            find "$root" -mindepth 1 -print
+        fi
+    done
+}
+
+apply_specs_to_path() {
+    local -r path="$1" is_default="$2"; shift 2
+    local -a specs=("$@")
+    local rc=0
+    for spec in "${specs[@]}"; do
+        [[ -z "$spec" ]] && continue
+        local -a args
+        mapfile -t args < <(build_setfacl_args_default "$spec" "$is_default")
+        set +e
+        execute_setfacl "$path" "$spec" "false" "${args[@]}"
+        local r=$?
+        set -e
+        [[ $r -ne 0 ]] && rc=1
+    done
+    [[ $rc -eq 0 ]] && return "$RETURN_SUCCESS" || return "$RETURN_FAILED"
+}
+
+apply_rules() {
+    local total_applied=0 total_skipped=0 total_failed=0
+    local rules_count; rules_count=$(get_rules_count)
+    local apply_order; apply_order=$(get_apply_order)
+
+    for ((i=0; i<rules_count; i++)); do
+        log_bold "Processing rule #$((i+1))"
+        local tsv recurse include_self types_csv syntax match_base case_sensitive apply_defaults
+        local save_IFS="$IFS"; IFS=$'\t'; tsv=$(get_rule_params_tsv "$i"); read -r recurse include_self types_csv syntax match_base case_sensitive apply_defaults <<< "$tsv"; IFS="$save_IFS"
+        local -a roots; mapfile -t roots < <(get_rule_roots "$i")
+        local -a file_specs dir_specs def_specs
+        mapfile -t file_specs < <(get_rule_entry_specs "$i" files)
+        mapfile -t dir_specs  < <(get_rule_entry_specs "$i" directories)
+        mapfile -t def_specs  < <(get_rule_default_specs "$i")
+        local -a includes excludes
+        mapfile -t includes < <(get_rule_patterns "$i" include)
+        mapfile -t excludes < <(get_rule_patterns "$i" exclude)
+
+        local -a candidates
+        mapfile -t candidates < <(enumerate_candidates_for_rule "$recurse" "$include_self" "${roots[@]}")
+        if [[ ${#candidates[@]} -eq 0 ]]; then
+            log_info "No candidates for this rule"
+            continue
+        fi
+        # sort by depth
+        if [[ "$apply_order" == "deep_to_shallow" ]]; then
+            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | awk '{print gsub(/\//, "&"), $0}' | sort -rn | cut -d' ' -f2-)
+        else
+            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | awk '{print gsub(/\//, "&"), $0}' | sort -n | cut -d' ' -f2-)
+        fi
+
+        local want_files=0 want_dirs=0
+        [[ ",${types_csv}," == *,file,* ]] && want_files=1
+        [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
+
+        for path in "${candidates[@]}"; do
+            path_under_any_filter "$path" || { ((total_skipped++)); continue; }
+            local is_file=0 is_dir=0
+            [[ -f "$path" ]] && is_file=1
+            [[ -d "$path" ]] && is_dir=1
+            if (( is_file==1 && want_files==0 )); then ((total_skipped++)); continue; fi
+            if (( is_dir==1 && want_dirs==0 )); then ((total_skipped++)); continue; fi
+
+            local base rel root_for_rel=""
+            base="$(basename -- "$path")"
+            for r in "${roots[@]}"; do
+                if [[ "$path" == "$r" || "$path" == $r/* ]]; then root_for_rel="$r"; break; fi
+            done
+            if [[ -n "$root_for_rel" ]]; then rel="${path#$root_for_rel/}"; else rel="$path"; fi
+
+            local pass=0
+            if [[ ${#includes[@]} -eq 0 && ${#excludes[@]} -eq 0 ]]; then
+                pass=1
+            else
+                if filter_by_patterns "$rel" "$base" "$syntax" "$case_sensitive" "${includes[@]}" -- "${excludes[@]}"; then pass=1; fi
+            fi
+            if [[ $pass -ne 1 ]]; then ((total_skipped++)); continue; fi
+
+            local rc=0
+            if (( is_file==1 && ${#file_specs[@]} > 0 )); then
+                apply_specs_to_path "$path" "false" "${file_specs[@]}" || rc=1
+            fi
+            if (( is_dir==1 && ${#dir_specs[@]} > 0 )); then
+                apply_specs_to_path "$path" "false" "${dir_specs[@]}" || rc=1
+            fi
+            if (( is_dir==1 )) && [[ "$apply_defaults" == "true" ]] && (( ${#def_specs[@]} > 0 )); then
+                apply_specs_to_path "$path" "true" "${def_specs[@]}" || rc=1
+            fi
+
+            if [[ $rc -eq 0 ]]; then ((total_applied++)); else ((total_failed++)); fi
+        done
+        echo
+    done
+
+    log_bold "Summary:"
+    log_bold "- Applied: $total_applied"
+    log_bold "- Skipped: $total_skipped"
+    log_bold "- Failed: $total_failed"
+
+    if [[ $total_failed -eq 0 ]]; then return 0; else return 1; fi
 }
 
 # =============================================================================
@@ -507,8 +673,8 @@ show_usage() {
     cat << EOF
 Usage: ${SCRIPT_NAME} -f FILE [OPTIONS] [PATH...]
 
-Apply POSIX ACLs to filesystem paths based on JSON definitions.
-If no PATHs are provided, ACLs are applied to all paths defined in the file.
+Apply POSIX ACLs to filesystem paths based on rule-based JSON configuration.
+If PATHs are provided, only candidates under these paths are processed.
 
 Required:
   -f, --file FILE     JSON file with ACL definitions
@@ -521,26 +687,35 @@ Options:
   -h, --help          Show this help message
 
 Examples:
-  # Apply ACLs for all paths in definitions file
-  ${SCRIPT_NAME} -f acl_definitions.json
+  # Apply all rules in config
+  ${SCRIPT_NAME} -f rules.json
 
-  # Apply ACLs only for specific paths
-  ${SCRIPT_NAME} -f acl_definitions.json /path/one /path/two
+  # Apply only under specific paths
+  ${SCRIPT_NAME} -f rules.json /srv/app /data/share
 
   # Simulate applying with a specific mask
-  ${SCRIPT_NAME} -f acl_definitions.json --mask r-x --dry-run /path/one
+  ${SCRIPT_NAME} -f rules.json --mask r-x --dry-run /opt/scripts
 
-JSON Schema:
+Config (excerpt):
   {
-    "/path/to/directory": {
-      "group": "some_group",
-      "permissions": "rwx",
-      "recursive": true|false  // optional, default false
-    }
+    "version": "1.0",
+    "apply_order": "shallow_to_deep",
+    "rules": [
+      {
+        "id": "example",
+        "roots": ["/path"],
+        "recurse": true,
+        "include_self": true,
+        "match": { "types": ["file","directory"], "pattern_syntax": "glob", "include": ["**/*"], "exclude": [] },
+        "entries": { "files": [{"kind":"group","name":"team","perms":"rw-"}], "directories": [{"kind":"group","name":"team","perms":"rwx"}] },
+        "apply_defaults": true,
+        "default_entries": [{"kind":"group","name":"team","perms":"rwx"}]
+      }
+    ]
   }
 
 Notes:
-  - Paths are processed from shallowest to deepest to ensure correct ACL inheritance
+  - Paths within each rule are processed shallow-to-deep (or deep-to-shallow) per apply_order
   - Skips paths that do not exist on filesystem (with informational message)
   - Validates group existence if 'getent' command is available on the system
   - Respects the NO_COLOR environment variable for color output control
@@ -587,15 +762,7 @@ main() {
 
     log_bold "ACL definitions from: ${CONFIG[definitions_file]}"
 
-    local -a paths_to_process
-    mapfile -t paths_to_process < <(determine_target_paths)
-
-    if [[ ${#paths_to_process[@]} -eq 0 ]]; then
-        log_warning "No paths to process."
-        exit "$EXIT_SUCCESS"
-    fi
-
-    apply_acls "${paths_to_process[@]}"
+    apply_rules
 }
 
 # Entry point - only execute if run directly
