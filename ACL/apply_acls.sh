@@ -48,9 +48,6 @@ declare -A color_codes=()
 declare -i ENTRIES_ATTEMPTED=0
 declare -i ENTRIES_FAILED=0
 
-# Summary rows (tab-separated fields): path, type, attempted, failed, status
-declare -a SUMMARY_ROWS=()
-
 # Required dependencies
 readonly -a REQUIRED_COMMANDS=("jq" "setfacl")
 
@@ -535,6 +532,7 @@ apply_rules() {
     local apply_order; apply_order=$(get_apply_order)
 
     for ((i=0; i<rules_count; i++)); do
+        log_bold "========================================"
         log_bold "Processing rule #$((i+1))"
         local tsv recurse include_self types_csv syntax match_base case_sensitive apply_defaults
         local save_IFS="$IFS"; IFS=$'\t'; tsv=$(get_rule_params_tsv "$i"); read -r recurse include_self types_csv syntax match_base case_sensitive apply_defaults <<< "$tsv"; IFS="$save_IFS"
@@ -590,6 +588,7 @@ apply_rules() {
             local rc=0
             local attempted_before=$ENTRIES_ATTEMPTED
             local failed_before=$ENTRIES_FAILED
+            log_processing "---- Target: $path"
             if (( is_file==1 && ${#file_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "false" "${file_specs[@]}" || rc=1
             fi
@@ -602,17 +601,15 @@ apply_rules() {
 
             local attempted_delta=$((ENTRIES_ATTEMPTED - attempted_before))
             local failed_delta=$((ENTRIES_FAILED - failed_before))
-            local obj_type="file"
-            (( is_dir==1 )) && obj_type="directory"
             if [[ $rc -eq 0 ]]; then
                 total_applied=$((total_applied+1))
-                SUMMARY_ROWS+=("$path\t$obj_type\t$attempted_delta\t$failed_delta\tAPPLIED")
+                log_success "Applied to $path (entries: $attempted_delta, failed: $failed_delta)"
             else
                 total_failed=$((total_failed+1))
-                SUMMARY_ROWS+=("$path\t$obj_type\t$attempted_delta\t$failed_delta\tFAILED")
+                log_error "Failed on $path (entries: $attempted_delta, failed: $failed_delta)"
             fi
         done
-        echo
+        log_bold "----------------------------------------"
     done
 
     log_bold "Summary:"
@@ -621,17 +618,6 @@ apply_rules() {
     log_bold "- Paths with failures: $total_failed"
     log_bold "- ACL entries attempted: $ENTRIES_ATTEMPTED"
     log_bold "- ACL entries failed: $ENTRIES_FAILED"
-
-    # Pretty table
-    if [[ ${#SUMMARY_ROWS[@]} -gt 0 ]]; then
-        echo
-        log_bold "Details:"
-        printf "%s\n" "PATH\tTYPE\tENTRIES\tFAILED\tSTATUS" | expand -t 4
-        printf "%s\n" "----\t----\t-------\t------\t------" | expand -t 4
-        for row in "${SUMMARY_ROWS[@]}"; do
-            printf "%s\n" "$row" | expand -t 4
-        done
-    fi
 
     if [[ $total_failed -eq 0 ]]; then return 0; else return 1; fi
 }
