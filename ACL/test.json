@@ -1,0 +1,47 @@
+{
+    "apply_order": "shallow_to_deep",
+    "rules": [
+        {
+            "id": "test",
+            "roots": [
+                "/var/opt/apps/mep"
+            ],
+            "recurse": true,
+            "include_self": true,
+            "match": {
+                "types": [
+                    "directory"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ]
+            },
+            "entries": {
+                "directories": [
+                    {
+                        "kind": "owner",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "owning_group",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "test_toto",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "---"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rwx"
+                    }
+                ]
+            }
+        }
+    ]
+}

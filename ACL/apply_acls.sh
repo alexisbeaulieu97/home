@@ -44,6 +44,10 @@ declare -a target_paths=()
 declare -A json_cache=()
 declare -A color_codes=()
 
+# Global counters for entry-level stats
+declare -i ENTRIES_ATTEMPTED=0
+declare -i ENTRIES_FAILED=0
+
 # Required dependencies
 readonly -a REQUIRED_COMMANDS=("jq" "setfacl")
 
@@ -507,13 +511,17 @@ apply_specs_to_path() {
     local rc=0
     for spec in "${specs[@]}"; do
         [[ -z "$spec" ]] && continue
+        ENTRIES_ATTEMPTED=$((ENTRIES_ATTEMPTED+1))
         local -a args
         mapfile -t args < <(build_setfacl_args_default "$spec" "$is_default")
         set +e
         execute_setfacl "$path" "$spec" "false" "${args[@]}"
         local r=$?
         set -e
-        [[ $r -ne 0 ]] && rc=1
+        if [[ $r -ne 0 ]]; then
+            ENTRIES_FAILED=$((ENTRIES_FAILED+1))
+            rc=1
+        fi
     done
     [[ $rc -eq 0 ]] && return "$RETURN_SUCCESS" || return "$RETURN_FAILED"
 }
@@ -593,9 +601,11 @@ apply_rules() {
     done
 
     log_bold "Summary:"
-    log_bold "- Applied: $total_applied"
-    log_bold "- Skipped: $total_skipped"
-    log_bold "- Failed: $total_failed"
+    log_bold "- Paths applied (all entries succeeded): $total_applied"
+    log_bold "- Paths skipped: $total_skipped"
+    log_bold "- Paths with failures: $total_failed"
+    log_bold "- ACL entries attempted: $ENTRIES_ATTEMPTED"
+    log_bold "- ACL entries failed: $ENTRIES_FAILED"
 
     if [[ $total_failed -eq 0 ]]; then return 0; else return 1; fi
 }
