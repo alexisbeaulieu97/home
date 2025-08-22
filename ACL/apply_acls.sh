@@ -402,7 +402,14 @@ path_under_any_filter() {
         return 0
     fi
     for base in "${target_paths[@]}"; do
-        if [[ "$path" == "$base" || "$path" == $base/* ]]; then
+        if [[ "$path" == "$base" ]]; then
+            return 0
+        fi
+        # Safe string prefix check without glob interpretation
+        local base_no_trailing="${base%/}"
+        if (( ${#path} > ${#base_no_trailing} )) \
+           && [[ "${path:0:${#base_no_trailing}}" == "$base_no_trailing" ]] \
+           && [[ "${path:${#base_no_trailing}:1}" == "/" ]]; then
             return 0
         fi
     done
@@ -410,14 +417,18 @@ path_under_any_filter() {
 }
 
 match_glob() {
-    local -r str="$1" base="$2" cs="$3"; shift 3
+    local -r str="$1" base="$2" cs="$3" mb="$4"; shift 4
     local -a patterns=("$@")
     local saved=0
     if shopt -q nocasematch; then saved=1; fi
     if [[ "$cs" == "false" ]]; then shopt -s nocasematch; else shopt -u nocasematch; fi
     for pat in "${patterns[@]}"; do
         [[ -z "$pat" ]] && continue
-        if [[ "$str" == $pat || "$base" == $pat ]]; then
+        if [[ "$str" == $pat ]]; then
+            (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+            return 0
+        fi
+        if [[ "$mb" == "true" ]] && [[ "$base" == $pat ]]; then
             (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
             return 0
         fi
@@ -427,20 +438,22 @@ match_glob() {
 }
 
 match_regex() {
-    local -r str="$1" base="$2" cs="$3"; shift 3
+    local -r str="$1" base="$2" cs="$3" mb="$4"; shift 4
     local -a patterns=("$@")
     local flags="-E"
     [[ "$cs" == "false" ]] && flags="-Ei"
     for pat in "${patterns[@]}"; do
         [[ -z "$pat" ]] && continue
         echo "$str" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
-        echo "$base" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
+        if [[ "$mb" == "true" ]]; then
+            echo "$base" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
+        fi
     done
     return 1
 }
 
 filter_by_patterns() {
-    local -r rel="$1" base="$2" syntax="$3" cs="$4"; shift 4
+    local -r rel="$1" base="$2" syntax="$3" cs="$4" mb="$5"; shift 5
     local -a includes=() excludes=()
     local mode="include"
     for token in "$@"; do
@@ -452,17 +465,17 @@ filter_by_patterns() {
         ok=0
     else
         if [[ "$syntax" == "glob" ]]; then
-            match_glob "$rel" "$base" "$cs" "${includes[@]}" && ok=0
+            match_glob "$rel" "$base" "$cs" "$mb" "${includes[@]}" && ok=0
         else
-            match_regex "$rel" "$base" "$cs" "${includes[@]}" && ok=0
+            match_regex "$rel" "$base" "$cs" "$mb" "${includes[@]}" && ok=0
         fi
     fi
     [[ $ok -ne 0 ]] && return 1
     if [[ ${#excludes[@]} -gt 0 ]]; then
         if [[ "$syntax" == "glob" ]]; then
-            match_glob "$rel" "$base" "$cs" "${excludes[@]}" && return 1
+            match_glob "$rel" "$base" "$cs" "$mb" "${excludes[@]}" && return 1
         else
-            match_regex "$rel" "$base" "$cs" "${excludes[@]}" && return 1
+            match_regex "$rel" "$base" "$cs" "$mb" "${excludes[@]}" && return 1
         fi
     fi
     return 0
@@ -556,7 +569,7 @@ apply_rules() {
             if [[ ${#includes[@]} -eq 0 && ${#excludes[@]} -eq 0 ]]; then
                 pass=1
             else
-                if filter_by_patterns "$rel" "$base" "$syntax" "$case_sensitive" "${includes[@]}" -- "${excludes[@]}"; then pass=1; fi
+                if filter_by_patterns "$rel" "$base" "$syntax" "$case_sensitive" "$match_base" "${includes[@]}" -- "${excludes[@]}"; then pass=1; fi
             fi
             if [[ $pass -ne 1 ]]; then ((total_skipped++)); continue; fi
 
