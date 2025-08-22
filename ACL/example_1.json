@@ -1,0 +1,310 @@
+{
+    "$schema": "https://example.com/schemas/acl-config.schema.json",
+    "version": "1.0",
+    "apply_order": "shallow_to_deep",
+    "rules": [
+        {
+            "id": "base-app",
+            "description": "Base ACLs for /srv/app; broad rule; defaults for dirs; exclude tmp and cache.",
+            "roots": [
+                "/srv/app"
+            ],
+            "recurse": true,
+            "include_self": true,
+            "match": {
+                "types": [
+                    "file",
+                    "directory"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ],
+                "exclude": [
+                    "**/tmp/**",
+                    "**/.cache/**"
+                ],
+                "match_base": true,
+                "case_sensitive": true
+            },
+            "entries": {
+                "directories": [
+                    {
+                        "kind": "group",
+                        "name": "devops",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "owner",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "owning_group",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "r-x"
+                    }
+                ],
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "devops",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "owner",
+                        "perms": "rw-"
+                    },
+                    {
+                        "kind": "owning_group",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "r--"
+                    }
+                ]
+            },
+            "apply_defaults": true,
+            "default_entries": [
+                {
+                    "kind": "group",
+                    "name": "devops",
+                    "perms": "r-x"
+                },
+                {
+                    "kind": "mask",
+                    "perms": "r-x"
+                }
+            ]
+        },
+        {
+            "id": "scripts-exec",
+            "description": "Grant execute to shell scripts; apply to files only; don't touch directories.",
+            "roots": [
+                "/srv/app/scripts"
+            ],
+            "recurse": true,
+            "include_self": false,
+            "match": {
+                "types": [
+                    "file"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*.sh",
+                    "**/*.bash"
+                ],
+                "exclude": [
+                    "**/archive/**"
+                ],
+                "match_base": true
+            },
+            "entries": {
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "devops",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "owning_group",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "r-x"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "logs-files-only",
+            "description": "Ops can read/write logs; others read-only; files only.",
+            "roots": [
+                "/srv/app/logs"
+            ],
+            "recurse": true,
+            "include_self": false,
+            "match": {
+                "types": [
+                    "file"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ]
+            },
+            "entries": {
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "ops",
+                        "perms": "rw-"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rw-"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "data-dirs-only",
+            "description": "Make data directories writable by data group; do not touch files.",
+            "roots": [
+                "/data/share"
+            ],
+            "recurse": true,
+            "match": {
+                "types": [
+                    "directory"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ],
+                "exclude": [
+                    "**/tmp/**"
+                ]
+            },
+            "entries": {
+                "directories": [
+                    {
+                        "kind": "group",
+                        "name": "data",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "owning_group",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rwx"
+                    }
+                ]
+            },
+            "apply_defaults": true,
+            "default_entries": [
+                {
+                    "kind": "group",
+                    "name": "data",
+                    "perms": "rwx"
+                },
+                {
+                    "kind": "mask",
+                    "perms": "rwx"
+                }
+            ]
+        },
+        {
+            "id": "config-json-regex",
+            "description": "Only JSON configs under conf directories; regex matching; files only.",
+            "roots": [
+                "/srv/app"
+            ],
+            "recurse": true,
+            "include_self": false,
+            "match": {
+                "types": [
+                    "file"
+                ],
+                "pattern_syntax": "regex",
+                "include": [
+                    ".*/conf/[A-Za-z0-9_.-]+\\.json$"
+                ],
+                "case_sensitive": true
+            },
+            "entries": {
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "devops",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "---"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "r--"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "bin-exec-X",
+            "description": "Use X to set exec on dirs and existing exec files; both types.",
+            "roots": [
+                "/srv/app/bin"
+            ],
+            "recurse": true,
+            "match": {
+                "types": [
+                    "file",
+                    "directory"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ]
+            },
+            "entries": {
+                "directories": [
+                    {
+                        "kind": "group",
+                        "name": "devops",
+                        "perms": "r-X"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r-X"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "r-X"
+                    }
+                ],
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "devops",
+                        "perms": "r-X"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "r-X"
+                    }
+                ]
+            }
+        }
+    ]
+}

@@ -1,0 +1,187 @@
+{
+    "$schema": "https://example.com/schemas/acl-config-v1.json",
+    "version": "1.0",
+    "options": {
+        "apply_order": "broad_first",
+        "pattern_style": "glob",
+        "default_recursive": false,
+        "default_apply_to": "both",
+        "default_mask": "auto"
+    },
+    "paths": {
+        "/srv/app": {
+            "priority": 10,
+            "mask": "auto",
+            "rules": [
+                {
+                    "name": "base-permissions",
+                    "recursive": true,
+                    "apply_to": "both",
+                    "patterns": {
+                        "include": [
+                            "**"
+                        ],
+                        "exclude": [
+                            "**/tmp/**"
+                        ]
+                    },
+                    "entries": [
+                        {
+                            "type": "group",
+                            "name": "app-admins",
+                            "perms": "rwx"
+                        },
+                        {
+                            "type": "group",
+                            "name": "app-devs",
+                            "perms": "r-x"
+                        },
+                        {
+                            "type": "other",
+                            "perms": "---"
+                        },
+                        {
+                            "type": "mask",
+                            "perms": "rwx"
+                        }
+                    ],
+                    "defaults": [
+                        {
+                            "type": "group",
+                            "name": "app-admins",
+                            "perms": "rwx"
+                        },
+                        {
+                            "type": "group",
+                            "name": "app-devs",
+                            "perms": "r-x"
+                        },
+                        {
+                            "type": "other",
+                            "perms": "---"
+                        },
+                        {
+                            "type": "mask",
+                            "perms": "rwx"
+                        }
+                    ]
+                }
+            ]
+        },
+        "/srv/app/logs": {
+            "priority": 90,
+            "rules": [
+                {
+                    "name": "logs-files-only",
+                    "recursive": true,
+                    "apply_to": "files",
+                    "entries": [
+                        {
+                            "type": "group",
+                            "name": "app-ops",
+                            "perms": "rw-"
+                        },
+                        {
+                            "type": "group",
+                            "name": "app-admins",
+                            "perms": "rwx"
+                        },
+                        {
+                            "type": "other",
+                            "perms": "r--"
+                        }
+                    ]
+                }
+            ]
+        },
+        "/opt/scripts": {
+            "priority": 20,
+            "rules": [
+                {
+                    "name": "only-shell-scripts",
+                    "recursive": true,
+                    "apply_to": "files",
+                    "patterns": {
+                        "include": [
+                            "**/*.sh"
+                        ],
+                        "exclude": []
+                    },
+                    "entries": [
+                        {
+                            "type": "group",
+                            "name": "app-admins",
+                            "perms": "rwx"
+                        },
+                        {
+                            "type": "group",
+                            "name": "app-devs",
+                            "perms": "r-x"
+                        }
+                    ]
+                }
+            ]
+        },
+        "/data/share": {
+            "priority": 30,
+            "rules": [
+                {
+                    "name": "dirs-only-with-defaults",
+                    "recursive": true,
+                    "apply_to": "directories",
+                    "patterns": {
+                        "include": [
+                            "**"
+                        ],
+                        "exclude": [
+                            "**/tmp/**"
+                        ]
+                    },
+                    "entries": [
+                        {
+                            "type": "group",
+                            "name": "data-users",
+                            "perms": "rwx"
+                        },
+                        {
+                            "type": "other",
+                            "perms": "r-x"
+                        }
+                    ],
+                    "defaults": [
+                        {
+                            "type": "group",
+                            "name": "data-users",
+                            "perms": "rwx"
+                        },
+                        {
+                            "type": "other",
+                            "perms": "r-x"
+                        }
+                    ]
+                }
+            ]
+        },
+        "/data/share/tmp": {
+            "priority": 100,
+            "rules": [
+                {
+                    "name": "tmp-relaxed",
+                    "recursive": true,
+                    "apply_to": "both",
+                    "entries": [
+                        {
+                            "type": "group",
+                            "name": "data-users",
+                            "perms": "rwx"
+                        },
+                        {
+                            "type": "other",
+                            "perms": "rwx"
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+}

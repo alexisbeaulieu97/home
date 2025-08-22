@@ -1,0 +1,364 @@
+{
+    "version": "1.0",
+    "apply_order": "shallow_to_deep",
+    "rules": [
+        {
+            "id": "app-base",
+            "description": "Base ACLs for the app tree; applied to both files and directories.",
+            "roots": [
+                "/srv/app"
+            ],
+            "recurse": true,
+            "include_self": true,
+            "match": {
+                "types": [
+                    "file",
+                    "directory"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ],
+                "exclude": [
+                    "**/tmp/**"
+                ]
+            },
+            "entries": {
+                "directories": [
+                    {
+                        "kind": "owner",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "owning_group",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "app-admins",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "app-devs",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rwx"
+                    }
+                ],
+                "files": [
+                    {
+                        "kind": "owner",
+                        "perms": "rw-"
+                    },
+                    {
+                        "kind": "owning_group",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "app-admins",
+                        "perms": "rw-"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "app-devs",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rw-"
+                    }
+                ]
+            },
+            "apply_defaults": true,
+            "default_entries": [
+                {
+                    "kind": "owner",
+                    "perms": "rwx"
+                },
+                {
+                    "kind": "owning_group",
+                    "perms": "r-x"
+                },
+                {
+                    "kind": "group",
+                    "name": "app-admins",
+                    "perms": "rwx"
+                },
+                {
+                    "kind": "group",
+                    "name": "app-devs",
+                    "perms": "r-x"
+                },
+                {
+                    "kind": "mask",
+                    "perms": "rwx"
+                }
+            ]
+        },
+        {
+            "id": "logs-tighten",
+            "description": "Restrict log files; files only. Allow ops and admins write, others none.",
+            "roots": [
+                "/srv/app/logs"
+            ],
+            "recurse": true,
+            "include_self": false,
+            "match": {
+                "types": [
+                    "file"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ],
+                "exclude": [
+                    "**/archive/**"
+                ]
+            },
+            "entries": {
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "app-ops",
+                        "perms": "rw-"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "app-admins",
+                        "perms": "rw-"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "---"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rw-"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "logs-readable-traces",
+            "description": "Permit world-read for .log and .trace regardless of previous rule; regex match.",
+            "roots": [
+                "/srv/app/logs"
+            ],
+            "recurse": true,
+            "include_self": false,
+            "match": {
+                "types": [
+                    "file"
+                ],
+                "pattern_syntax": "regex",
+                "include": [
+                    ".*\\.(log|trace)$"
+                ],
+                "case_sensitive": false
+            },
+            "entries": {
+                "files": [
+                    {
+                        "kind": "other",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rw-"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "scripts-exec",
+            "description": "Grant execute to shell scripts only; do not touch directories.",
+            "roots": [
+                "/opt/scripts"
+            ],
+            "recurse": true,
+            "include_self": false,
+            "match": {
+                "types": [
+                    "file"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*.sh"
+                ],
+                "exclude": []
+            },
+            "entries": {
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "app-admins",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "app-devs",
+                        "perms": "r-x"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "docs-readonly",
+            "description": "Read-only docs like README and all .md files; basename matching enabled.",
+            "roots": [
+                "/srv/app"
+            ],
+            "recurse": true,
+            "include_self": true,
+            "match": {
+                "types": [
+                    "file"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "README*",
+                    "**/*.md"
+                ],
+                "match_base": true
+            },
+            "entries": {
+                "files": [
+                    {
+                        "kind": "owner",
+                        "perms": "rw-"
+                    },
+                    {
+                        "kind": "group",
+                        "name": "app-devs",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r--"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rw-"
+                    }
+                ]
+            }
+        },
+        {
+            "id": "data-dirs-with-defaults",
+            "description": "Data share directories only; defaults propagate to new children directories.",
+            "roots": [
+                "/data/share"
+            ],
+            "recurse": true,
+            "include_self": true,
+            "match": {
+                "types": [
+                    "directory"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ],
+                "exclude": [
+                    "**/tmp/**"
+                ]
+            },
+            "entries": {
+                "directories": [
+                    {
+                        "kind": "group",
+                        "name": "data-users",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "r-x"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rwx"
+                    }
+                ]
+            },
+            "apply_defaults": true,
+            "default_entries": [
+                {
+                    "kind": "group",
+                    "name": "data-users",
+                    "perms": "rwx"
+                },
+                {
+                    "kind": "other",
+                    "perms": "r-x"
+                },
+                {
+                    "kind": "mask",
+                    "perms": "rwx"
+                }
+            ]
+        },
+        {
+            "id": "tmp-relaxed",
+            "description": "Relax permissions under tmp; both files and directories.",
+            "roots": [
+                "/data/share/tmp"
+            ],
+            "recurse": true,
+            "include_self": true,
+            "match": {
+                "types": [
+                    "file",
+                    "directory"
+                ],
+                "pattern_syntax": "glob",
+                "include": [
+                    "**/*"
+                ]
+            },
+            "entries": {
+                "directories": [
+                    {
+                        "kind": "group",
+                        "name": "data-users",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rwx"
+                    }
+                ],
+                "files": [
+                    {
+                        "kind": "group",
+                        "name": "data-users",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "other",
+                        "perms": "rwx"
+                    },
+                    {
+                        "kind": "mask",
+                        "perms": "rwx"
+                    }
+                ]
+            }
+        }
+    ]
+}
