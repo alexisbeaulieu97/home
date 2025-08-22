@@ -588,8 +588,7 @@ apply_rules() {
             local attempted_before=$ENTRIES_ATTEMPTED
             local failed_before=$ENTRIES_FAILED
             log_bold ""
-            log_bold "---------- TARGET ----------"
-            log_processing "Target: $path"
+            log_bold "---------- $path ----------"
             if (( is_file==1 && ${#file_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "false" "${file_specs[@]}" || rc=1
             fi
@@ -611,7 +610,6 @@ apply_rules() {
             fi
             log_bold ""
         done
-        log_bold "----------------------------------------"
     done
 
     log_bold "Summary:"
