@@ -532,8 +532,7 @@ apply_rules() {
     local apply_order; apply_order=$(get_apply_order)
 
     for ((i=0; i<rules_count; i++)); do
-        log_bold "========================================"
-        log_bold "Processing rule #$((i+1))"
+        log_bold "---------- PROCESSING RULE $((i+1)) ------------"
         local tsv recurse include_self types_csv syntax match_base case_sensitive apply_defaults
         local save_IFS="$IFS"; IFS=$'\t'; tsv=$(get_rule_params_tsv "$i"); read -r recurse include_self types_csv syntax match_base case_sensitive apply_defaults <<< "$tsv"; IFS="$save_IFS"
         local -a roots; mapfile -t roots < <(get_rule_roots "$i")
@@ -588,7 +587,9 @@ apply_rules() {
             local rc=0
             local attempted_before=$ENTRIES_ATTEMPTED
             local failed_before=$ENTRIES_FAILED
-            log_processing "---- Target: $path"
+            log_bold ""
+            log_bold "---------- TARGET ----------"
+            log_processing "Target: $path"
             if (( is_file==1 && ${#file_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "false" "${file_specs[@]}" || rc=1
             fi
@@ -608,6 +609,7 @@ apply_rules() {
                 total_failed=$((total_failed+1))
                 log_error "Failed on $path (entries: $attempted_delta, failed: $failed_delta)"
             fi
+            log_bold ""
         done
         log_bold "----------------------------------------"
     done
