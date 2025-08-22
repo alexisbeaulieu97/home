@@ -189,7 +189,7 @@ get_json_data() {
 
     # Execute query and cache result
     local result
-    if result=$(jq -r "$jq_filter" "${jq_args[@]}" "$file" 2>&1); then
+    if result=$(jq -r -f - "${jq_args[@]}" "$file" <<<"$jq_filter" 2>&1); then
         json_cache[$cache_key]="$result"
         echo "$result"
     else
@@ -211,13 +211,14 @@ get_rules_count() {
 
 get_rule_roots() {
     local -r idx="$1"
-    jq -r ".rules[$idx].roots[]" "${CONFIG[definitions_file]}"
+    jq -r --argjson i "$idx" '.rules[$i].roots[]' "${CONFIG[definitions_file]}"
 }
 
 get_rule_params_tsv() {
     local -r idx="$1"
     jq -r \
-      ".rules[$idx] as $r | [($r.recurse // false), ($r.include_self // true), ((($r.match.types // [\"file\",\"directory\"]) | join(","))), ($r.match.pattern_syntax // \"glob\"), ($r.match.match_base // true), ($r.match.case_sensitive // true), ($r.apply_defaults // false)] | @tsv" \
+      --argjson i "$idx" \
+      '.rules[$i] as $r | [($r.recurse // false), ($r.include_self // true), ((($r.match.types // ["file","directory"]) | join(","))), ($r.match.pattern_syntax // "glob"), ($r.match.match_base // true), ($r.match.case_sensitive // true), ($r.apply_defaults // false)] | @tsv' \
       "${CONFIG[definitions_file]}"
 }
 
@@ -225,7 +226,8 @@ get_rule_params_tsv() {
 get_rule_entry_specs() {
     local -r idx="$1" type="$2"
     jq -r \
-      ".rules[$idx].entries.$type // [] | .[] | if .kind == \"user\" then \"u:\(.name):\(.perms)\" elif .kind == \"group\" then \"g:\(.name):\(.perms)\" elif .kind == \"owner\" then \"u::\(.perms)\" elif .kind == \"owning_group\" then \"g::\(.perms)\" elif .kind == \"other\" then \"o::\(.perms)\" elif .kind == \"mask\" then \"m::\(.perms)\" else empty end" \
+      --argjson i "$idx" --arg type "$type" \
+      '.rules[$i].entries[$type] // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' \
       "${CONFIG[definitions_file]}"
 }
 
@@ -233,14 +235,15 @@ get_rule_entry_specs() {
 get_rule_default_specs() {
     local -r idx="$1"
     jq -r \
-      ".rules[$idx].default_entries // [] | .[] | if .kind == \"user\" then \"u:\(.name):\(.perms)\" elif .kind == \"group\" then \"g:\(.name):\(.perms)\" elif .kind == \"owner\" then \"u::\(.perms)\" elif .kind == \"owning_group\" then \"g::\(.perms)\" elif .kind == \"other\" then \"o::\(.perms)\" elif .kind == \"mask\" then \"m::\(.perms)\" else empty end" \
+      --argjson i "$idx" \
+      '.rules[$i].default_entries // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' \
       "${CONFIG[definitions_file]}"
 }
 
 # Pattern lists (newline-separated) for include/exclude
 get_rule_patterns() {
     local -r idx="$1" kind="$2" # kind: include|exclude
-    jq -r ".rules[$idx].match.$kind // [] | .[]" "${CONFIG[definitions_file]}"
+    jq -r --argjson i "$idx" --arg kind "$kind" '.rules[$i].match[$kind] // [] | .[]' "${CONFIG[definitions_file]}"
 }
 
 # Optimized path operations
