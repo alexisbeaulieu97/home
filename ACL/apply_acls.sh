@@ -122,13 +122,18 @@ _log() {
     printf "%b%s%s%b\n" "$color_start" "$prefix" "$*" "$color_end" >&"$stream"
 }
 
+# Logging function that respects quiet mode
+_log_unless_quiet() {
+    [[ "${CONFIG[quiet]}" == "true" ]] || _log "$@"
+}
+
 # Logging functions
-log_info()       { [[ "${CONFIG[quiet]}" == "true" ]] || _log blue 2 "INFO: " "$*"; }
-log_success()    { [[ "${CONFIG[quiet]}" == "true" ]] || _log green 2 "SUCCESS: " "$*"; }
+log_info()       { _log_unless_quiet blue 2 "INFO: " "$*"; }
+log_success()    { _log_unless_quiet green 2 "SUCCESS: " "$*"; }
 log_error()      { _log red 2 "ERROR: " "$*"; }
 log_warning()    { _log yellow 2 "WARNING: " "$*"; }
-log_processing() { [[ "${CONFIG[quiet]}" == "true" ]] || _log cyan 2 "PROCESSING: " "$*"; }
-log_bold()       { [[ "${CONFIG[quiet]}" == "true" ]] || _log bold 2 "" "$*"; }
+log_processing() { _log_unless_quiet cyan 2 "PROCESSING: " "$*"; }
+log_bold()       { _log_unless_quiet bold 2 "" "$*"; }
 
 # =============================================================================
 # VALIDATION FRAMEWORK - Centralized and extensible
