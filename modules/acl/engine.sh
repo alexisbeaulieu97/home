@@ -1,14 +1,7 @@
 #!/bin/bash
 #
-# apply_acls.sh - Apply POSIX ACLs to filesystem paths based on JSON definitions
-#
-# This script provides a robust way to apply Access Control Lists (ACLs) to filesystem
-# paths using configuration defined in a JSON file. It supports recursive application,
-# mask handling, group validation, and comprehensive error reporting.
-#
-# Author: Alexis Beaulieu
-# Dependencies: bash >=4.0, jq, setfacl
-# License: MIT
+# engine.sh - Apply POSIX ACLs to filesystem paths based on JSON definitions
+# (Relocated from ACL/apply_acls.sh for repository restructuring)
 #
 
 set -euo pipefail
@@ -817,3 +810,4 @@ main() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     main "$@"
 fi
+
