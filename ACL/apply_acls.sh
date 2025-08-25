@@ -36,6 +36,7 @@ declare -A CONFIG=(
     [mask_explicit]=""
     [no_recalc_mask]="false"
     [dry_run]="false"
+    [quiet]="false"
     [enable_colors]="true"
 )
 
@@ -122,12 +123,12 @@ _log() {
 }
 
 # Logging functions
-log_info()       { _log blue 2 "INFO: " "$*"; }
-log_success()    { _log green 2 "SUCCESS: " "$*"; }
+log_info()       { [[ "${CONFIG[quiet]}" == "true" ]] || _log blue 2 "INFO: " "$*"; }
+log_success()    { [[ "${CONFIG[quiet]}" == "true" ]] || _log green 2 "SUCCESS: " "$*"; }
 log_error()      { _log red 2 "ERROR: " "$*"; }
 log_warning()    { _log yellow 2 "WARNING: " "$*"; }
-log_processing() { _log cyan 2 "PROCESSING: " "$*"; }
-log_bold()       { _log bold 2 "" "$*"; }
+log_processing() { [[ "${CONFIG[quiet]}" == "true" ]] || _log cyan 2 "PROCESSING: " "$*"; }
+log_bold()       { [[ "${CONFIG[quiet]}" == "true" ]] || _log bold 2 "" "$*"; }
 
 # =============================================================================
 # VALIDATION FRAMEWORK - Centralized and extensible
@@ -688,6 +689,9 @@ parse_arguments() {
             --dry-run)
                 CONFIG[dry_run]="true"
                 shift ;;
+            -q|--quiet)
+                CONFIG[quiet]="true"
+                shift ;;
             -h|--help)
                 show_usage
                 exit "$EXIT_SUCCESS" ;;
@@ -722,6 +726,7 @@ Options:
   --no-color          Disable colors (equivalent to --color never)
   --mask VALUE        Mask handling: auto|skip|<rwx> (default: auto)
   --dry-run           Simulate without making changes
+  -q, --quiet         Suppress informational output (errors still shown)
   -h, --help          Show this help message
 
 Examples:
