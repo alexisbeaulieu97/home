@@ -1,3 +1,4 @@
+// Relocated from ACL/example_1.json
 {
     "$schema": "https://example.com/schemas/acl-config.schema.json",
     "version": "1.0",
@@ -219,92 +220,7 @@
                     "perms": "rwx"
                 }
             ]
-        },
-        {
-            "id": "config-json-regex",
-            "description": "Only JSON configs under conf directories; regex matching; files only.",
-            "roots": [
-                "/srv/app"
-            ],
-            "recurse": true,
-            "include_self": false,
-            "match": {
-                "types": [
-                    "file"
-                ],
-                "pattern_syntax": "regex",
-                "include": [
-                    ".*/conf/[A-Za-z0-9_.-]+\\.json$"
-                ],
-                "case_sensitive": true
-            },
-            "entries": {
-                "files": [
-                    {
-                        "kind": "group",
-                        "name": "devops",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "---"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "r--"
-                    }
-                ]
-            }
-        },
-        {
-            "id": "bin-exec-X",
-            "description": "Use X to set exec on dirs and existing exec files; both types.",
-            "roots": [
-                "/srv/app/bin"
-            ],
-            "recurse": true,
-            "match": {
-                "types": [
-                    "file",
-                    "directory"
-                ],
-                "pattern_syntax": "glob",
-                "include": [
-                    "**/*"
-                ]
-            },
-            "entries": {
-                "directories": [
-                    {
-                        "kind": "group",
-                        "name": "devops",
-                        "perms": "r-X"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r-X"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "r-X"
-                    }
-                ],
-                "files": [
-                    {
-                        "kind": "group",
-                        "name": "devops",
-                        "perms": "r-X"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "r-X"
-                    }
-                ]
-            }
         }
     ]
 }
+
