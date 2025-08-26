@@ -376,10 +376,15 @@ get_rule_default_specs() {
 # Pattern lists (newline-separated) for include/exclude
 get_rule_patterns() {
     local -r idx="$1" kind="$2" # kind: include|exclude
+    local value=""
     if [[ "$kind" == "include" ]]; then
-        echo "${rule_cache[${idx}_includes]:-}"
+        value="${rule_cache[${idx}_includes]:-}"
     elif [[ "$kind" == "exclude" ]]; then
-        echo "${rule_cache[${idx}_excludes]:-}"
+        value="${rule_cache[${idx}_excludes]:-}"
+    fi
+    # Only echo if value is not empty
+    if [[ -n "$value" ]]; then
+        echo "$value"
     fi
 }
 
