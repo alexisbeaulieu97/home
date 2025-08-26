@@ -691,7 +691,6 @@ apply_rules() {
     local apply_order; apply_order=$(get_apply_order)
 
     for ((i=0; i<rules_count; i++)); do
-        log_bold "---------- PROCESSING RULE $((i+1)) ------------"
         local tsv recurse include_self types_csv syntax match_base case_sensitive apply_defaults
         local save_IFS="$IFS"; IFS=$'\t'; tsv=$(get_rule_params_tsv "$i"); read -r recurse include_self types_csv syntax match_base case_sensitive apply_defaults <<< "$tsv"; IFS="$save_IFS"
         local -a roots; mapfile -t roots < <(get_rule_roots "$i")
@@ -706,7 +705,6 @@ apply_rules() {
         local -a candidates
         mapfile -t candidates < <(enumerate_candidates_for_rule "$recurse" "$include_self" "${roots[@]}")
         if [[ ${#candidates[@]} -eq 0 ]]; then
-            log_info "No candidates for this rule"
             continue
         fi
         # sort by depth using optimized bash-native function
@@ -746,8 +744,7 @@ apply_rules() {
             local rc=0
             local attempted_before=$ENTRIES_ATTEMPTED
             local failed_before=$ENTRIES_FAILED
-            log_bold ""
-            log_bold "---------- $path ----------"
+
             if (( is_file==1 && ${#file_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "false" "${file_specs[@]}" || rc=1
             fi
@@ -762,16 +759,20 @@ apply_rules() {
             local failed_delta=$((ENTRIES_FAILED - failed_before))
             if [[ $rc -eq 0 ]]; then
                 total_applied=$((total_applied+1))
-                log_success "Applied to $path (entries: $attempted_delta, failed: $failed_delta)"
+                # Single concise line per path
+                if [[ "$failed_delta" -gt 0 ]]; then
+                    log_info "$path: applied $attempted_delta entries, $failed_delta failed"
+                else
+                    log_info "$path: applied $attempted_delta entries"
+                fi
             else
                 total_failed=$((total_failed+1))
-                log_error "Failed on $path (entries: $attempted_delta, failed: $failed_delta)"
+                log_error "$path: failed ($attempted_delta entries, $failed_delta failed)"
             fi
-            log_bold ""
         done
     done
 
-    # Simplified concise summary
+    # Summary
     local entries_ok=$((ENTRIES_ATTEMPTED - ENTRIES_FAILED))
     local success_pct=100
     if [[ $ENTRIES_ATTEMPTED -gt 0 ]]; then
