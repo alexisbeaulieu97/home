@@ -46,7 +46,7 @@ declare -i ENTRIES_ATTEMPTED=0
 declare -i ENTRIES_FAILED=0
 
 # Required dependencies
-readonly -a REQUIRED_COMMANDS=("jq" "setfacl" "find" "sort" "cut" "grep")
+readonly -a REQUIRED_COMMANDS=("jq" "setfacl")
 
 # =============================================================================
 # ERROR HANDLING FRAMEWORK
