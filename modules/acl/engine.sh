@@ -540,7 +540,12 @@ execute_setfacl() {
         
         # Provide helpful hints for common issues
         if [[ "$output" =~ "Operation not supported" ]]; then
-            log_error "HINT: Filesystem may not support ACLs. Try: mount | grep $(df --output=source "$path" | tail -1)"
+            local fs_source
+            fs_source=$(df --output=source "$path" | tail -1)
+            # Safely quote the filesystem source for shell usage
+            local fs_source_quoted
+            fs_source_quoted=$(printf '%q' "$fs_source")
+            log_error "HINT: Filesystem may not support ACLs. Try: mount | grep $fs_source_quoted"
         elif [[ "$output" =~ "Invalid argument" ]]; then
             log_error "HINT: Group may not exist. Check with: getent group <groupname>"
         elif [[ "$output" =~ "Operation not permitted" ]]; then
