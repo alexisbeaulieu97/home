@@ -222,16 +222,16 @@ cache_all_rules() {
             else empty end;
         "apply_order|\(.apply_order // \"shallow_to_deep\")",
         "rules_count|\(.rules|length)",
-        (.rules | to_entries[] |
+        (.rules | to_entries[] as $e |
             (
-                "rule|\(.key)|params|\(.value.recurse // false)|\(.value.include_self // true)|\(((.value.match.types // [\"file\",\"directory\"]) | join(\",")))|\(.value.match.pattern_syntax // \"glob\")|\(.value.match.match_base // true)|\(.value.match.case_sensitive // true)|\(.value.apply_defaults // false)"
+                "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\((((($e.value.match.types // [\"file\",\"directory\"]) | join(\","))))|\($e.value.match.pattern_syntax // \"glob\")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.apply_defaults // false)"
             ),
-            (.value.roots // [] | .[] | "rule|\(.key)|root|\(.)"),
-            (.value.entries.files // [] | .[] | (specfmt(.) ) | select(length>0) | "rule|\(.key)|file_spec|\(.)"),
-            (.value.entries.directories // [] | .[] | (specfmt(.) ) | select(length>0) | "rule|\(.key)|dir_spec|\(.)"),
-            (.value.default_entries // [] | .[] | (specfmt(.) ) | select(length>0) | "rule|\(.key)|def_spec|\(.)"),
-            (.value.match.include // [] | .[] | "rule|\(.key)|include|\(.)"),
-            (.value.match.exclude // [] | .[] | "rule|\(.key)|exclude|\(.)")
+            ($e.value.roots // [] | .[] | "rule|\($e.key)|root|\(.)"),
+            ($e.value.entries.files // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|file_spec|\(.)"),
+            ($e.value.entries.directories // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|dir_spec|\(.)"),
+            ($e.value.default_entries // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|def_spec|\(.)"),
+            ($e.value.match.include // [] | .[] | "rule|\($e.key)|include|\(.)"),
+            ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)")
         )
     ' "${CONFIG[definitions_file]}") || fail "$EXIT_ERROR" "Failed to parse definitions file '${CONFIG[definitions_file]}'"
 
