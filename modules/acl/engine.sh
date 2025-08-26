@@ -380,17 +380,16 @@ execute_setfacl() {
 
     local suffix=""
     [[ "$recursive" == "true" ]] && suffix=" (recursively)"
-    log_info "Applying ACL: $acl_entry$suffix"
 
     if [[ "${CONFIG[dry_run]}" == "true" ]]; then
         log_info "Dry-run: setfacl ${args[*]} -- \"$path\""
-        log_success "Simulated success"
+        log_success "Applied ACL: $acl_entry$suffix (dry-run)"
         return "$RETURN_SUCCESS"
     fi
 
     local output
     if output=$(setfacl "${args[@]}" -- "$path" 2>&1); then
-        log_success "Applied successfully"
+        log_success "Applied ACL: $acl_entry$suffix"
         return "$RETURN_SUCCESS"
     else
         log_error "Failed to apply ACL to '$path': $output"

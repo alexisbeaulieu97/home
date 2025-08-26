@@ -1,46 +1,19 @@
-// Relocated from ACL/test.json
 {
-    "apply_order": "shallow_to_deep",
+    "version": "1.0",
     "rules": [
         {
-            "id": "test",
-            "roots": [
-                "/var/opt/apps/mep"
-            ],
-            "recurse": true,
+            "id": "dry-run-test",
+            "roots": [ "/tmp" ],
+            "recurse": false,
             "include_self": true,
             "match": {
-                "types": [
-                    "directory"
-                ],
+                "types": ["directory"],
                 "pattern_syntax": "glob",
-                "include": [
-                    "**/*"
-                ]
+                "include": ["*"]
             },
             "entries": {
                 "directories": [
-                    {
-                        "kind": "owner",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "owning_group",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "test_toto",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "---"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rwx"
-                    }
+                    { "kind": "mask", "perms": "r-x" }
                 ]
             }
         }
