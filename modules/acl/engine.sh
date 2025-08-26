@@ -38,6 +38,9 @@ declare -a target_paths=()
 declare -A json_cache=()
 declare -A color_codes=()
 
+# Performance optimization: cache parsed rule data
+declare -A rule_cache=()
+
 # Global counters for entry-level stats
 declare -i ENTRIES_ATTEMPTED=0
 declare -i ENTRIES_FAILED=0
@@ -201,52 +204,81 @@ get_json_data() {
 }
 
 # =============================================================================
-# RULES ACCESSORS (new schema)
+# RULES ACCESSORS (new schema) - Performance optimized
 # =============================================================================
 
+# Cache all rule data to minimize jq calls
+cache_all_rules() {
+    local rules_count; rules_count=$(jq -r '.rules | length' "${CONFIG[definitions_file]}")
+    local apply_order; apply_order=$(jq -r '.apply_order // "shallow_to_deep"' "${CONFIG[definitions_file]}")
+    
+    rule_cache[rules_count]="$rules_count"
+    rule_cache[apply_order]="$apply_order"
+    
+    # Parse all rule data in a single jq call for better performance
+    local rule_data
+    rule_data=$(jq -r '
+        .rules | to_entries | .[] | 
+        "\(.key)|\(.value.recurse // false)|\(.value.include_self // true)|\(((.value.match.types // ["file","directory"]) | join(",")))|\(.value.match.pattern_syntax // "glob")|\(.value.match.match_base // true)|\(.value.match.case_sensitive // true)|\(.value.apply_defaults // false)"
+    ' "${CONFIG[definitions_file]}")
+    
+    while IFS='|' read -r idx recurse include_self types_csv syntax match_base case_sensitive apply_defaults; do
+        rule_cache["${idx}_params"]="$recurse	$include_self	$types_csv	$syntax	$match_base	$case_sensitive	$apply_defaults"
+    done <<< "$rule_data"
+    
+    # Cache roots, specs, and patterns for all rules
+    for ((i=0; i<rules_count; i++)); do
+        rule_cache["${i}_roots"]=$(jq -r --argjson i "$i" '.rules[$i].roots[]' "${CONFIG[definitions_file]}")
+        rule_cache["${i}_file_specs"]=$(jq -r --argjson i "$i" '.rules[$i].entries.files // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' "${CONFIG[definitions_file]}")
+        rule_cache["${i}_dir_specs"]=$(jq -r --argjson i "$i" '.rules[$i].entries.directories // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' "${CONFIG[definitions_file]}")
+        rule_cache["${i}_def_specs"]=$(jq -r --argjson i "$i" '.rules[$i].default_entries // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' "${CONFIG[definitions_file]}")
+        rule_cache["${i}_includes"]=$(jq -r --argjson i "$i" '.rules[$i].match.include // [] | .[]' "${CONFIG[definitions_file]}")
+        rule_cache["${i}_excludes"]=$(jq -r --argjson i "$i" '.rules[$i].match.exclude // [] | .[]' "${CONFIG[definitions_file]}")
+    done
+}
+
 get_apply_order() {
-    jq -r '.apply_order // "shallow_to_deep"' "${CONFIG[definitions_file]}"
+    echo "${rule_cache[apply_order]}"
 }
 
 get_rules_count() {
-    jq -r '.rules | length' "${CONFIG[definitions_file]}"
+    echo "${rule_cache[rules_count]}"
 }
 
 get_rule_roots() {
     local -r idx="$1"
-    jq -r --argjson i "$idx" '.rules[$i].roots[]' "${CONFIG[definitions_file]}"
+    echo "${rule_cache[${idx}_roots]}"
 }
 
 get_rule_params_tsv() {
     local -r idx="$1"
-    jq -r \
-      --argjson i "$idx" \
-      '.rules[$i] as $r | [($r.recurse // false), ($r.include_self // true), ((($r.match.types // ["file","directory"]) | join(","))), ($r.match.pattern_syntax // "glob"), ($r.match.match_base // true), ($r.match.case_sensitive // true), ($r.apply_defaults // false)] | @tsv' \
-      "${CONFIG[definitions_file]}"
+    echo "${rule_cache[${idx}_params]}"
 }
 
 # Returns newline-separated setfacl specs for entries of a given type: files|directories
 get_rule_entry_specs() {
     local -r idx="$1" type="$2"
-    jq -r \
-      --argjson i "$idx" --arg type "$type" \
-      '.rules[$i].entries[$type] // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' \
-      "${CONFIG[definitions_file]}"
+    if [[ "$type" == "files" ]]; then
+        echo "${rule_cache[${idx}_file_specs]}"
+    elif [[ "$type" == "directories" ]]; then
+        echo "${rule_cache[${idx}_dir_specs]}"
+    fi
 }
 
 # Returns newline-separated setfacl specs for default entries (directories only)
 get_rule_default_specs() {
     local -r idx="$1"
-    jq -r \
-      --argjson i "$idx" \
-      '.rules[$i].default_entries // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' \
-      "${CONFIG[definitions_file]}"
+    echo "${rule_cache[${idx}_def_specs]}"
 }
 
 # Pattern lists (newline-separated) for include/exclude
 get_rule_patterns() {
     local -r idx="$1" kind="$2" # kind: include|exclude
-    jq -r --argjson i "$idx" --arg kind "$kind" '.rules[$i].match[$kind] // [] | .[]' "${CONFIG[definitions_file]}"
+    if [[ "$kind" == "include" ]]; then
+        echo "${rule_cache[${idx}_includes]}"
+    elif [[ "$kind" == "exclude" ]]; then
+        echo "${rule_cache[${idx}_excludes]}"
+    fi
 }
 
 # Optimized path operations
@@ -270,15 +302,19 @@ get_path_config() {
 # PATH OPERATIONS - Simplified and more efficient
 # =============================================================================
 
-# Sort paths by depth (shallow to deep) for proper ACL inheritance
+# Sort paths by depth (shallow to deep) for proper ACL inheritance - optimized
 sort_paths_by_depth() {
+    local -a paths_with_depth=()
     while IFS= read -r path; do
         [[ -n "$path" ]] || continue
-        # Count directory separators to determine depth
-        local depth
-        depth=$(tr -cd '/' <<< "$path" | wc -c)
-        printf '%d\t%s\n' "$depth" "$path"
-    done | LC_ALL=C sort -n | cut -f2-
+        # Count directory separators to determine depth using bash parameter expansion
+        local path_without_slashes="${path//\//}"
+        local depth=$(( ${#path} - ${#path_without_slashes} ))
+        paths_with_depth+=("$depth|$path")
+    done
+    
+    # Sort using bash built-in sorting capabilities
+    printf '%s\n' "${paths_with_depth[@]}" | sort -t'|' -n | cut -d'|' -f2-
 }
 
 # Batch path validation for better performance
@@ -506,22 +542,40 @@ enumerate_candidates_for_rule() {
 apply_specs_to_path() {
     local -r path="$1" is_default="$2"; shift 2
     local -a specs=("$@")
-    local rc=0
+    [[ ${#specs[@]} -eq 0 ]] && return "$RETURN_SUCCESS"
+    
+    # Batch multiple ACL specifications into a single setfacl call for better performance
+    local -a all_args=()
+    local valid_specs=0
+    
     for spec in "${specs[@]}"; do
         [[ -z "$spec" ]] && continue
-        ENTRIES_ATTEMPTED=$((ENTRIES_ATTEMPTED+1))
         local -a args
         mapfile -t args < <(build_setfacl_args_default "$spec" "$is_default")
-        set +e
-        execute_setfacl "$path" "$spec" "false" "${args[@]}"
-        local r=$?
-        set -e
-        if [[ $r -ne 0 ]]; then
-            ENTRIES_FAILED=$((ENTRIES_FAILED+1))
-            rc=1
+        if [[ ${#args[@]} -gt 0 ]]; then
+            all_args+=("${args[@]}")
+            ((valid_specs++))
         fi
     done
-    [[ $rc -eq 0 ]] && return "$RETURN_SUCCESS" || return "$RETURN_FAILED"
+    
+    if [[ $valid_specs -eq 0 ]]; then
+        return "$RETURN_SUCCESS"
+    fi
+    
+    ENTRIES_ATTEMPTED=$((ENTRIES_ATTEMPTED + valid_specs))
+    
+    # Execute single batched setfacl call
+    set +e
+    execute_setfacl "$path" "batch:$valid_specs" "false" "${all_args[@]}"
+    local rc=$?
+    set -e
+    
+    if [[ $rc -ne 0 ]]; then
+        ENTRIES_FAILED=$((ENTRIES_FAILED + valid_specs))
+        return "$RETURN_FAILED"
+    fi
+    
+    return "$RETURN_SUCCESS"
 }
 
 apply_rules() {
@@ -548,11 +602,11 @@ apply_rules() {
             log_info "No candidates for this rule"
             continue
         fi
-        # sort by depth
+        # sort by depth using optimized bash-native function
         if [[ "$apply_order" == "deep_to_shallow" ]]; then
-            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | awk '{print gsub(/\//, "&"), $0}' | sort -rn | cut -d' ' -f2-)
+            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | sort_paths_by_depth | tac)
         else
-            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | awk '{print gsub(/\//, "&"), $0}' | sort -n | cut -d' ' -f2-)
+            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | sort_paths_by_depth)
         fi
 
         local want_files=0 want_dirs=0
@@ -786,6 +840,7 @@ initialize() {
     validate_dependencies
     init_colors
     validate_definitions_file
+    cache_all_rules  # Performance optimization: cache all rule data upfront
 }
 
 # Determine paths to process
