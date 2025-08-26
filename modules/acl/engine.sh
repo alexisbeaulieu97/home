@@ -203,6 +203,42 @@ get_json_data() {
     fi
 }
 
+# Validate that all groups referenced in the configuration exist
+validate_configuration_groups() {
+    if ! command -v getent >/dev/null 2>&1; then
+        log_warning "getent not available - skipping group existence validation"
+        return 0
+    fi
+    
+    log_info "Validating group existence..."
+    local groups_output
+    groups_output=$(jq -r '
+        [.rules[].entries | values | 
+         (.files[]?, .directories[]?, .default_entries[]? | select(.kind=="group") | .name)] | 
+        unique | .[]
+    ' "${CONFIG[definitions_file]}" 2>/dev/null) || {
+        log_warning "Could not extract groups from configuration for validation"
+        return 0
+    }
+    
+    local -a missing_groups=()
+    local group
+    while IFS= read -r group; do
+        [[ -n "$group" ]] || continue
+        if ! getent group "$group" >/dev/null 2>&1; then
+            missing_groups+=("$group")
+        fi
+    done <<< "$groups_output"
+    
+    if [[ ${#missing_groups[@]} -gt 0 ]]; then
+        log_warning "The following groups do not exist on the system:"
+        printf "  %s\n" "${missing_groups[@]}" >&2
+        log_warning "ACL application may fail. Create these groups or update the configuration."
+    else
+        log_info "All referenced groups exist on the system"
+    fi
+}
+
 # =============================================================================
 # RULES ACCESSORS (new schema) - Performance optimized
 # =============================================================================
@@ -494,6 +530,18 @@ execute_setfacl() {
     if output=$(setfacl "${args[@]}" -- "$path" 2>&1); then
         return "$RETURN_SUCCESS"
     else
+        local error_msg="setfacl failed for $path: $output"
+        log_error "$error_msg"
+        
+        # Provide helpful hints for common issues
+        if [[ "$output" =~ "Operation not supported" ]]; then
+            log_error "HINT: Filesystem may not support ACLs. Try: mount | grep $(df --output=source "$path" | tail -1)"
+        elif [[ "$output" =~ "Invalid argument" ]]; then
+            log_error "HINT: Group may not exist. Check with: getent group <groupname>"
+        elif [[ "$output" =~ "Operation not permitted" ]]; then
+            log_error "HINT: Insufficient permissions. Try running with sudo or check file ownership"
+        fi
+        
         return "$RETURN_FAILED"
     fi
 }
@@ -966,6 +1014,7 @@ initialize() {
     validate_dependencies
     init_colors
     validate_definitions_file
+    validate_configuration_groups  # Check that all groups exist
     cache_all_rules  # Performance optimization: cache all rule data upfront
 }
 
