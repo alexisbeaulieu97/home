@@ -729,8 +729,9 @@ apply_specs_to_path() {
         shared_flags+=("-m" "m::${CONFIG[mask_explicit]}")
     fi
 
-    # Chunk to avoid exceeding system arg limits
-    local chunk_size=64
+    # Chunk to avoid exceeding system arg limits.
+    # The chunk size is configurable via CONFIG[chunk_size]. Default is 64, chosen to stay well below typical ARG_MAX limits.
+    local chunk_size="${CONFIG[chunk_size]}"
     local total=${#unique_specs[@]}
     local start=0
     local rc_total=0
