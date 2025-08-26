@@ -220,11 +220,11 @@ cache_all_rules() {
             elif x.kind=="other" then "o::\(x.perms)"
             elif x.kind=="mask" then "m::\(x.perms)"
             else empty end;
-        "apply_order|\(.apply_order // \"shallow_to_deep\")",
+        "apply_order|\(.apply_order // "shallow_to_deep")",
         "rules_count|\(.rules|length)",
         (.rules | to_entries[] as $e |
             (
-                "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\((((($e.value.match.types // [\"file\",\"directory\"]) | join(\","))))|\($e.value.match.pattern_syntax // \"glob\")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.apply_defaults // false)"
+                "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.apply_defaults // false)"
             ),
             ($e.value.roots // [] | .[] | "rule|\($e.key)|root|\(.)"),
             ($e.value.entries.files // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|file_spec|\(.)"),
@@ -325,25 +325,25 @@ get_rule_params_tsv() {
 get_rule_entry_specs() {
     local -r idx="$1" type="$2"
     if [[ "$type" == "files" ]]; then
-        echo "${rule_cache[${idx}_file_specs]}"
+        echo "${rule_cache[${idx}_file_specs]:-}"
     elif [[ "$type" == "directories" ]]; then
-        echo "${rule_cache[${idx}_dir_specs]}"
+        echo "${rule_cache[${idx}_dir_specs]:-}"
     fi
 }
 
 # Returns newline-separated setfacl specs for default entries (directories only)
 get_rule_default_specs() {
     local -r idx="$1"
-    echo "${rule_cache[${idx}_def_specs]}"
+    echo "${rule_cache[${idx}_def_specs]:-}"
 }
 
 # Pattern lists (newline-separated) for include/exclude
 get_rule_patterns() {
     local -r idx="$1" kind="$2" # kind: include|exclude
     if [[ "$kind" == "include" ]]; then
-        echo "${rule_cache[${idx}_includes]}"
+        echo "${rule_cache[${idx}_includes]:-}"
     elif [[ "$kind" == "exclude" ]]; then
-        echo "${rule_cache[${idx}_excludes]}"
+        echo "${rule_cache[${idx}_excludes]:-}"
     fi
 }
 
