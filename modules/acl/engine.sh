@@ -527,19 +527,48 @@ match_glob() {
     local -a patterns=("$@")
     local saved=0
     if shopt -q nocasematch; then saved=1; fi
+    local globstar_saved=0
+    if shopt -q globstar; then globstar_saved=1; fi
+    
+    # Enable globstar for ** patterns and set case sensitivity
+    shopt -s globstar
     if [[ "$cs" == "false" ]]; then shopt -s nocasematch; else shopt -u nocasematch; fi
+    
     for pat in "${patterns[@]}"; do
         [[ -z "$pat" ]] && continue
-        if [[ "$str" == $pat ]]; then
-            (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
-            return 0
-        fi
-        if [[ "$mb" == "true" ]] && [[ "$base" == $pat ]]; then
-            (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
-            return 0
+        # For patterns starting with **, also try matching without the **/ prefix
+        if [[ "$pat" == "**/"* ]]; then
+            local simple_pat="${pat#**/}"
+            if [[ "$str" == $simple_pat ]] || [[ "$str" == $pat ]]; then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
+            if [[ "$mb" == "true" ]] && ([[ "$base" == $simple_pat ]] || [[ "$base" == $pat ]]); then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
+        else
+            if [[ "$str" == $pat ]]; then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
+            if [[ "$mb" == "true" ]] && [[ "$base" == $pat ]]; then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
         fi
     done
+    # Restore settings
     (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+    (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
     return 1
 }
 
