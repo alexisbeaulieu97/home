@@ -610,12 +610,18 @@ apply_rules() {
         done
     done
 
-    log_bold "Summary:"
-    log_bold "- Paths applied (all entries succeeded): $total_applied"
-    log_bold "- Paths skipped: $total_skipped"
-    log_bold "- Paths with failures: $total_failed"
-    log_bold "- ACL entries attempted: $ENTRIES_ATTEMPTED"
-    log_bold "- ACL entries failed: $ENTRIES_FAILED"
+    # Simplified concise summary
+    local entries_ok=$((ENTRIES_ATTEMPTED - ENTRIES_FAILED))
+    local success_pct=100
+    if [[ $ENTRIES_ATTEMPTED -gt 0 ]]; then
+        success_pct=$(( entries_ok * 100 / ENTRIES_ATTEMPTED ))
+    fi
+    local summary_suffix=""
+    if [[ "${CONFIG[dry_run]}" == "true" ]]; then
+        summary_suffix=" (dry-run)"
+    fi
+    log_bold "Summary${summary_suffix}: paths ok=$total_applied failed=$total_failed skipped=$total_skipped"
+    log_bold "           entries ok=$entries_ok failed=$ENTRIES_FAILED attempted=$ENTRIES_ATTEMPTED (${success_pct}% ok)"
 
     if [[ $total_failed -eq 0 ]]; then return 0; else return 1; fi
 }
