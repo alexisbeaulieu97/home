@@ -254,7 +254,7 @@ cache_all_rules() {
                     params)
                         # Store as TSV to preserve existing contract
                         local tsv
-                        tsv="${parts[3]}\t${parts[4]}\t${parts[5]}\t${parts[6]}\t${parts[7]}\t${parts[8]}\t${parts[9]}"
+                        tsv="${parts[3]}"$'\t'"${parts[4]}"$'\t'"${parts[5]}"$'\t'"${parts[6]}"$'\t'"${parts[7]}"$'\t'"${parts[8]}"$'\t'"${parts[9]}"
                         rule_cache["${idx}_params"]="$tsv"
                         ;;
                     root)
