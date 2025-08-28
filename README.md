@@ -11,9 +11,12 @@ bin/
 
 modules/
   acl/
-    apply_acls.sh     # ACL engine (Linux; requires setfacl)
+    engine.sh         # Production-ready ACL engine (Linux; requires setfacl, jq)
     schema.json       # JSON schema for ACL configuration
-    examples/         # Example ACL configs
+    test_*.sh         # Comprehensive test suite
+    run_tests.sh      # Test runner
+    README.md         # Complete usage documentation
+    TESTING.md        # Testing guide
 
 scripts/
   lib/
@@ -25,7 +28,7 @@ Makefile              # Common entry points
 
 ### Quick start
 
-- Prerequisites: bash, git. On Linux, the ACL engine requires `setfacl`; the bootstrap installs it when possible.
+- Prerequisites: bash, git. On Linux, the ACL engine requires `setfacl` and `jq`; the bootstrap installs them when possible.
 
 1) Bootstrap the environment
 
@@ -36,8 +39,15 @@ make bootstrap
 2) Apply ACL rules (Linux only)
 
 ```bash
-# Use any JSON config; examples are under modules/acl/examples
-make acl CONFIG=modules/acl/examples/example_1.json
+# Test first (recommended)
+cd modules/acl
+./engine.sh -f config.json --dry-run
+
+# Apply ACLs
+./engine.sh -f config.json
+
+# Run test suite
+./run_tests.sh integration
 ```
 
 3) Upgrade this repository safely
@@ -49,12 +59,13 @@ make upgrade
 ### Commands
 
 - `bin/bootstrap`: Installs common dependencies based on OS.
-- `bin/acl-apply`: Runs the ACL engine; pass `-f <config.json>` and optional flags.
+- `modules/acl/engine.sh`: Production-ready ACL engine with comprehensive validation and testing
+- `modules/acl/run_tests.sh`: Test suite runner for validation and integration testing
 - `scripts/upgrade.sh`: Fetch/pull with a safety tag, then re-run bootstrap.
 
 ### Notes
 
 - macOS does not provide `setfacl` by default; the ACL module targets Linux. The bootstrap will install `jq` on macOS and warn for ACL support.
 - WSL is treated as Linux.
-- See `modules/acl/schema.json` for config schema and `modules/acl/examples` for samples.
+- See `modules/acl/README.md` for complete documentation and `modules/acl/TESTING.md` for testing guide.
 

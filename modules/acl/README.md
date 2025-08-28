@@ -1,168 +1,243 @@
-### ACL engine: rule-based POSIX ACL application
+# ACL Engine
 
-- **Engine**: `modules/acl/engine.sh`
-- **Wrapper**: `bin/acl-apply` (preferred) or `modules/acl/apply_acls.sh`
-- **Schema**: `modules/acl/schema.json`
-- **Examples**: `modules/acl/examples/*.json`
+Rule-based POSIX ACL application with pattern matching, type-specific permissions, and recursive operations.
 
-## What this is
-Applies POSIX ACLs to files and directories based on a declarative JSON config. It supports recursion, include/exclude pattern matching (glob or regex), separate ACL for files vs directories, and default ACLs for inheritance.
+## Quick Start
 
-## Requirements
-- Linux or WSL. macOS is not supported for applying ACLs.
-- Commands: `jq`, `setfacl`.
-  - Debian/Ubuntu: `sudo apt-get install jq acl`
-  - RHEL/CentOS/Fedora: `sudo yum install jq acl` or `sudo dnf install jq acl`
-
-## Quick start
-Run via the wrapper (paths are relative to the `home/` directory):
 ```bash
-bin/acl-apply -f modules/acl/examples/example_1.json --dry-run
+# Install dependencies
+sudo apt-get install acl jq  # Ubuntu/Debian
+sudo yum install acl jq      # RHEL/CentOS
+
+# Apply ACLs (always test first!)
+./engine.sh -f config.json --dry-run
+./engine.sh -f config.json
+
+# Apply to specific paths only
+./engine.sh -f config.json /srv/app /data
 ```
 
-Run the engine directly:
+## Usage
+
 ```bash
-modules/acl/engine.sh -f modules/acl/examples/example_1.json --dry-run
+engine.sh -f FILE [OPTIONS] [PATH...]
 ```
 
-Remove `--dry-run` to actually apply ACLs (likely requires sudo):
-```bash
-sudo bin/acl-apply -f modules/acl/examples/example_1.json
-```
+**Options:**
+- `-f, --file FILE` - JSON configuration file (required)
+- `--dry-run` - Preview changes without applying
+- `--quiet` - Suppress informational output
+- `--mask auto|skip|rwx` - Mask handling (default: auto)
+- `--color auto|always|never` - Color output (default: auto)
+- `--help` - Show detailed help
 
-## Command-line usage
-```bash
-Usage: engine.sh -f FILE [OPTIONS] [PATH...]
+## Configuration Format
 
-Apply POSIX ACLs to filesystem paths based on rule-based JSON configuration.
-If PATHs are provided, only candidates under these paths are processed.
-
-Required:
-  -f, --file FILE     JSON file with ACL definitions
-
-Options:
-  --color MODE        Output colors: auto|always|never (default: auto)
-  --no-color          Disable colors (equivalent to --color never)
-  --mask VALUE        Mask handling: auto|skip|<rwx> (default: auto)
-  --dry-run           Simulate without making changes
-  -q, --quiet         Suppress informational output (errors still shown)
-  -h, --help          Show this help message
-
-Exit Codes:
-  0 Success (may include skipped paths)
-  1 General Error
-  2 Invalid Arguments
-  3 Missing Dependencies
-  4 File Error
-```
-
-## JSON config (schema overview)
-See `modules/acl/schema.json` for the full JSON Schema. A minimal example:
 ```json
 {
   "version": "1.0",
   "apply_order": "shallow_to_deep",
   "rules": [
     {
-      "id": "example",
-      "roots": "/path",
+      "id": "app-permissions",
+      "roots": ["/srv/app", "/data/shared"],
       "recurse": true,
       "include_self": true,
       "match": {
         "types": ["file", "directory"],
         "pattern_syntax": "glob",
         "include": ["**/*"],
-        "exclude": []
+        "exclude": ["*.tmp", ".git/**"]
       },
-      "acl": ["g:team:rw-", "o::r--"],
-      "default_acl": ["g:team:rwx", "m::rwx"]
+      "acl": {
+        "files": [
+          {"kind": "group", "name": "developers", "mode": "rw-"},
+          {"kind": "other", "mode": "r--"}
+        ],
+        "directories": [
+          {"kind": "group", "name": "developers", "mode": "rwx"},
+          {"kind": "other", "mode": "r-x"}
+        ]
+      },
+      "default_acl": [
+        {"kind": "group", "name": "developers", "mode": "rwx"}
+      ]
     }
   ]
 }
 ```
 
-- **apply_order**: `shallow_to_deep` (default) or `deep_to_shallow` controls traversal order across candidates.
-- **rules[].roots**: list of starting paths (files or directories).
-- **rules[].recurse**: if true, traverse descendants under each root.
-- **rules[].include_self**: if true, also apply ACL to the root objects themselves.
-- **rules[].match**: filter candidates beneath roots.
-  - `types`: `file` and/or `directory`.
-  - `pattern_syntax`: `glob` or `regex`.
-  - `include` / `exclude`: pattern lists. With `glob`, `**/*` matches everything.
-  - `match_base`: also match against basename.
-  - `case_sensitive`: toggle case sensitivity.
-- **rules[].acl**: ACL entries either as a shared array (applies to both types) or an object with `files` and/or `directories` arrays.
-- **rules[].default_acl**: if present and non-empty, default ACLs are set on matched directories.
+## Configuration Reference
 
-## ACL entries and permission mapping
-Each entry can be in object form or short string form:
-- Object: `{"kind":"user","name":"alice","mode":"rw-"}` → `u:alice:rw-`
-- String: `"u:alice:rw-"`, `"g:devops:r-x"`, `"u::rw-"`, `"g::r-x"`, `"o::r--"`, `"m::r-x"`
+### Top Level
+- `version` - Config version (default: "1.0")
+- `apply_order` - `"shallow_to_deep"` or `"deep_to_shallow"` (default: shallow_to_deep)
+- `rules` - Array of ACL rules (required)
 
-`mode` (or the trailing part of the string) accepts `r`, `w`, `x`, `X`, `-`. `X` applies execute only to directories and files that already have execute for someone.
+### Rule Properties
+- `id` - Rule identifier (optional)
+- `roots` - Root path(s) - string or array (required)
+- `recurse` - Process subdirectories (default: false)
+- `include_self` - Apply to root paths (default: true)
+- `match` - Pattern-based filtering (optional)
+- `acl` - ACL entries to apply (required)
+- `default_acl` - Default ACL for directories (optional)
 
-## Pattern matching tips
-- Glob examples:
-  - Include all: `"include": ["**/*"]`
-  - Only directories named `config`: `"include": ["**/config"]`, set `types: ["directory"]`
-  - Exclude dotfiles: `"exclude": ["**/.*"]`
-- Regex examples:
-  - Only `.sh` files under scripts: `"pattern_syntax": "regex", "include": ["^scripts/.+\\.sh$"]`
-
-## Mask handling
-`--mask` controls how the effective rights mask is handled when calling `setfacl`:
-- `auto` (default): let `setfacl` recalculate the mask as needed.
-- `skip`: do not recalculate mask (`-n`).
-- explicit `rwx` (e.g. `--mask r-x`): apply a specific mask entry and skip recalculation.
-
-## Scoping by PATH arguments
-You can pass one or more `PATH` arguments to limit processing to candidates that are equal to or descend from those paths (string-prefix match on path segments). Examples:
-```bash
-# Only under /srv/app and /data/share
-sudo bin/acl-apply -f rules.json /srv/app /data/share
+### Match Filtering
+```json
+"match": {
+  "types": ["file", "directory"],     // Target types
+  "pattern_syntax": "glob",           // "glob" or "regex"
+  "include": ["**/*.py", "*.conf"],   // Include patterns
+  "exclude": ["*.tmp", ".git/**"],    // Exclude patterns
+  "case_sensitive": true,             // Case sensitivity (default: true)
+  "match_base": true                  // Match basename too (default: true)
+}
 ```
 
-## Practical examples
-- **Dry run everything in a config**:
-```bash
-bin/acl-apply -f modules/acl/examples/example_1.json --dry-run
+### ACL Entries
+
+**Type-specific format (recommended):**
+```json
+"acl": {
+  "files": [
+    {"kind": "group", "name": "developers", "mode": "rw-"},
+    {"kind": "other", "mode": "r--"}
+  ],
+  "directories": [
+    {"kind": "group", "name": "developers", "mode": "rwx"},
+    {"kind": "other", "mode": "r-x"}
+  ]
+}
 ```
 
-- **Apply with explicit mask and no color**:
-```bash
-sudo bin/acl-apply -f modules/acl/examples/example_1.json --mask r-x --no-color
+**Shared format:**
+```json
+"acl": [
+  {"kind": "group", "name": "developers", "mode": "rw-"},
+  {"kind": "other", "mode": "r--"}
+]
 ```
 
-- **Directories only, apply default ACLs** (in config):
+**String shorthand:**
+```json
+"acl": ["g:developers:rwx", "u:alice:rw-", "o::r--"]
+```
+
+### ACL Entry Types
+- `"user"` - Named user (requires `name`)
+- `"group"` - Named group (requires `name`)
+- `"owner"` - File owner (`u::`)
+- `"owning_group"` - File's group (`g::`)
+- `"other"` - Others (`o::`)
+- `"mask"` - Access mask (`m::`)
+
+### Permission Modes
+Standard POSIX: `rwx`, `rw-`, `r-x`, `r--`, `---`, etc.
+Use `X` for conditional execute (directories and existing executables).
+
+## Examples
+
+### Simple File Permissions
 ```json
 {
   "rules": [
     {
-      "roots": ["/data/projects"],
+      "roots": "/shared/docs",
       "recurse": true,
-      "match": { "types": ["directory"], "include": ["**/*"] },
-      "acl": { "directories": ["g:team:rwx"] },
-      "default_acl": ["g:team:rwx"]
+      "acl": {
+        "files": ["g:editors:rw-", "o::r--"],
+        "directories": ["g:editors:rwx", "o::r-x"]
+      }
     }
   ]
 }
 ```
 
+### Pattern-Based Rules
+```json
+{
+  "rules": [
+    {
+      "roots": "/project",
+      "recurse": true,
+      "match": {
+        "pattern_syntax": "glob",
+        "include": ["**/*.py", "**/*.sh"],
+        "exclude": ["**/test*", "**/.git/**"]
+      },
+      "acl": ["g:devs:rwx", "o::r-x"]
+    }
+  ]
+}
+```
+
+### User-Specific Access
+```json
+{
+  "rules": [
+    {
+      "roots": "/secure/data",
+      "recurse": true,
+      "acl": [
+        {"kind": "user", "name": "alice", "mode": "rwx"},
+        {"kind": "user", "name": "bob", "mode": "r-x"},
+        {"kind": "other", "mode": "---"}
+      ]
+    }
+  ]
+}
+```
+
+## Testing
+
+```bash
+# Run all tests
+./run_tests.sh
+
+# Run integration tests (recommended)
+./run_tests.sh integration
+
+# Check dependencies
+./run_tests.sh --check-deps
+```
+
+See [TESTING.md](TESTING.md) for detailed testing documentation.
+
+## Best Practices
+
+1. **Always test first**: Use `--dry-run` before applying
+2. **Validate JSON**: Use `jq . config.json` to check syntax
+3. **Check groups**: Ensure groups exist with `getent group groupname`
+4. **Backup ACLs**: Use `getfacl -R /path > backup.acl` before changes
+5. **Start simple**: Begin with basic rules, add complexity gradually
+6. **Use patterns wisely**: Exclude temporary and version control files
+
 ## Troubleshooting
-- **Missing required commands**: install `jq` and `acl` (`setfacl`). See Requirements above.
-- **Permission denied**: applying ACLs typically requires elevated privileges. Use `sudo`.
-- **Group/user not found**: ensure groups/users exist on the system. The engine warns if `getent` is available and cannot find the group.
-- **Path does not exist**: non-existent roots are skipped with a warning.
-- **Filesystem does not support ACLs**: ensure the filesystem and mount options support POSIX ACLs (e.g., mount with `acl`).
-- **macOS**: not supported for applying ACLs. Use WSL or a Linux environment.
 
-## Notes
-- Traversal can be `shallow_to_deep` or `deep_to_shallow`. Later rules can refine or override earlier ones because ACL entries are applied per-candidate in the selected order.
-- When `--dry-run` is set, no changes are made; a summary is still printed.
+**Missing dependencies:**
+```bash
+which jq setfacl  # Check availability
+```
 
-## Related files
-- Engine: `modules/acl/engine.sh`
-- Wrapper: `bin/acl-apply` and `modules/acl/apply_acls.sh`
-- Schema: `modules/acl/schema.json`
-- Examples: `modules/acl/examples/*.json`
+**Invalid JSON:**
+```bash
+jq . config.json  # Validate syntax
+```
 
+**Group doesn't exist:**
+```bash
+getent group groupname  # Check existence
+```
+
+**Permission issues:**
+```bash
+ls -la /path/to/target  # Check access
+```
+
+## Exit Codes
+- `0` - Success
+- `1` - General error
+- `2` - Invalid arguments
+- `3` - Missing dependencies
+- `4` - File error
