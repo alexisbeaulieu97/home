@@ -3,20 +3,25 @@
     "rules": [
         {
             "id": "dry-run-test",
-            "roots": [ "/tmp" ],
+            "roots": [
+                "/tmp"
+            ],
             "recurse": false,
             "include_self": true,
             "match": {
-                "types": ["directory"],
+                "types": [
+                    "directory"
+                ],
                 "pattern_syntax": "glob",
-                "include": ["*"]
+                "include": [
+                    "*"
+                ]
             },
-            "entries": {
+            "acl": {
                 "directories": [
-                    { "kind": "mask", "perms": "r-x" }
+                    "m::r-x"
                 ]
             }
         }
     ]
 }
-

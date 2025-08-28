@@ -28,65 +28,16 @@
                 "match_base": true,
                 "case_sensitive": true
             },
-            "entries": {
-                "directories": [
-                    {
-                        "kind": "group",
-                        "name": "devops",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "owner",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "owning_group",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "r-x"
-                    }
-                ],
-                "files": [
-                    {
-                        "kind": "group",
-                        "name": "devops",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "owner",
-                        "perms": "rw-"
-                    },
-                    {
-                        "kind": "owning_group",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "r--"
-                    }
-                ]
-            },
-            "apply_defaults": true,
-            "default_entries": [
-                {
-                    "kind": "group",
-                    "name": "devops",
-                    "perms": "r-x"
-                },
-                {
-                    "kind": "mask",
-                    "perms": "r-x"
-                }
+            "acl": [
+                "g:devops:r--",
+                "u::rw-",
+                "g::r--",
+                "o::r--",
+                "m::r--"
+            ],
+            "default_acl": [
+                "g:devops:r-x",
+                "m::r-x"
             ]
         },
         {
@@ -111,25 +62,12 @@
                 ],
                 "match_base": true
             },
-            "entries": {
+            "acl": {
                 "files": [
-                    {
-                        "kind": "group",
-                        "name": "devops",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "owning_group",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "r-x"
-                    }
+                    "g:devops:rwx",
+                    "g::r-x",
+                    "o::r-x",
+                    "m::r-x"
                 ]
             }
         },
@@ -150,21 +88,11 @@
                     "**/*"
                 ]
             },
-            "entries": {
+            "acl": {
                 "files": [
-                    {
-                        "kind": "group",
-                        "name": "ops",
-                        "perms": "rw-"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rw-"
-                    }
+                    "g:ops:rw-",
+                    "o::r--",
+                    "m::rw-"
                 ]
             }
         },
@@ -187,40 +115,18 @@
                     "**/tmp/**"
                 ]
             },
-            "entries": {
+            "acl": {
                 "directories": [
-                    {
-                        "kind": "group",
-                        "name": "data",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "owning_group",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rwx"
-                    }
+                    "g:data:rwx",
+                    "g::rwx",
+                    "o::r-x",
+                    "m::rwx"
                 ]
             },
-            "apply_defaults": true,
-            "default_entries": [
-                {
-                    "kind": "group",
-                    "name": "data",
-                    "perms": "rwx"
-                },
-                {
-                    "kind": "mask",
-                    "perms": "rwx"
-                }
+            "default_acl": [
+                "g:data:rwx",
+                "m::rwx"
             ]
         }
     ]
 }
-

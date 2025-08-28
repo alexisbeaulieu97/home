@@ -214,14 +214,16 @@ get_rules_count() {
 
 get_rule_roots() {
     local -r idx="$1"
-    jq -r --argjson i "$idx" '.rules[$i].roots[]' "${CONFIG[definitions_file]}"
+    jq -r --argjson i "$idx" '
+      .rules[$i].roots as $r | if ($r|type)=="string" then $r else ($r[]) end
+    ' "${CONFIG[definitions_file]}"
 }
 
 get_rule_params_tsv() {
     local -r idx="$1"
     jq -r \
       --argjson i "$idx" \
-      '.rules[$i] as $r | [($r.recurse // false), ($r.include_self // true), ((($r.match.types // ["file","directory"]) | join(","))), ($r.match.pattern_syntax // "glob"), ($r.match.match_base // true), ($r.match.case_sensitive // true), ($r.apply_defaults // false)] | @tsv' \
+      '.rules[$i] as $r | [($r.recurse // false), ($r.include_self // true), ((($r.match.types // ["file","directory"]) | join(","))), ($r.match.pattern_syntax // "glob"), ($r.match.match_base // true), ($r.match.case_sensitive // true)] | @tsv' \
       "${CONFIG[definitions_file]}"
 }
 
@@ -230,7 +232,19 @@ get_rule_entry_specs() {
     local -r idx="$1" type="$2"
     jq -r \
       --argjson i "$idx" --arg type "$type" \
-      '.rules[$i].entries[$type] // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' \
+      '
+      .rules[$i].acl as $acl
+      | if ($acl|type)=="array" then $acl else ($acl[$type] // []) end
+      | .[]
+      | if (type=="string") then .
+        else if .kind == "user" then "u:\(.name):\(.mode)"
+        elif .kind == "group" then "g:\(.name):\(.mode)"
+        elif .kind == "owner" then "u::\(.mode)"
+        elif .kind == "owning_group" then "g::\(.mode)"
+        elif .kind == "other" then "o::\(.mode)"
+        elif .kind == "mask" then "m::\(.mode)"
+        else empty end
+        end' \
       "${CONFIG[definitions_file]}"
 }
 
@@ -239,7 +253,7 @@ get_rule_default_specs() {
     local -r idx="$1"
     jq -r \
       --argjson i "$idx" \
-      '.rules[$i].default_entries // [] | .[] | if .kind == "user" then "u:\(.name):\(.perms)" elif .kind == "group" then "g:\(.name):\(.perms)" elif .kind == "owner" then "u::\(.perms)" elif .kind == "owning_group" then "g::\(.perms)" elif .kind == "other" then "o::\(.perms)" elif .kind == "mask" then "m::\(.perms)" else empty end' \
+      '.rules[$i].default_acl // [] | .[] | if (type=="string") then . else if .kind == "user" then "u:\(.name):\(.mode)" elif .kind == "group" then "g:\(.name):\(.mode)" elif .kind == "owner" then "u::\(.mode)" elif .kind == "owning_group" then "g::\(.mode)" elif .kind == "other" then "o::\(.mode)" elif .kind == "mask" then "m::\(.mode)" else empty end end' \
       "${CONFIG[definitions_file]}"
 }
 
@@ -531,8 +545,8 @@ apply_rules() {
 
     for ((i=0; i<rules_count; i++)); do
         log_bold "---------- PROCESSING RULE $((i+1)) ------------"
-        local tsv recurse include_self types_csv syntax match_base case_sensitive apply_defaults
-        local save_IFS="$IFS"; IFS=$'\t'; tsv=$(get_rule_params_tsv "$i"); read -r recurse include_self types_csv syntax match_base case_sensitive apply_defaults <<< "$tsv"; IFS="$save_IFS"
+        local tsv recurse include_self types_csv syntax match_base case_sensitive
+        local save_IFS="$IFS"; IFS=$'\t'; tsv=$(get_rule_params_tsv "$i"); read -r recurse include_self types_csv syntax match_base case_sensitive <<< "$tsv"; IFS="$save_IFS"
         local -a roots; mapfile -t roots < <(get_rule_roots "$i")
         local -a file_specs dir_specs def_specs
         mapfile -t file_specs < <(get_rule_entry_specs "$i" files)
@@ -556,8 +570,24 @@ apply_rules() {
         fi
 
         local want_files=0 want_dirs=0
-        [[ ",${types_csv}," == *,file,* ]] && want_files=1
-        [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
+        if [[ -z "$types_csv" || "$types_csv" == "," ]]; then
+            # Infer from ACL shape when types not provided
+            local acl_type
+            acl_type=$(jq -r --argjson i "$i" '.rules[$i].acl | type' "${CONFIG[definitions_file]}")
+            if [[ "$acl_type" == "array" ]]; then
+                want_files=1; want_dirs=1
+            else
+                local has_files has_dirs
+                has_files=$(jq -r --argjson i "$i" '((.rules[$i].acl.files // [])|length) > 0' "${CONFIG[definitions_file]}")
+                has_dirs=$(jq -r --argjson i "$i" '((.rules[$i].acl.directories // [])|length) > 0' "${CONFIG[definitions_file]}")
+                [[ "$has_files" == "true" ]] && want_files=1
+                [[ "$has_dirs" == "true" ]] && want_dirs=1
+                if (( want_files==0 && want_dirs==0 )); then want_files=1; want_dirs=1; fi
+            fi
+        else
+            [[ ",${types_csv}," == *,file,* ]] && want_files=1
+            [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
+        fi
 
         for path in "${candidates[@]}"; do
             path_under_any_filter "$path" || { total_skipped=$((total_skipped+1)); continue; }
@@ -593,7 +623,7 @@ apply_rules() {
             if (( is_dir==1 && ${#dir_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "false" "${dir_specs[@]}" || rc=1
             fi
-            if (( is_dir==1 )) && [[ "$apply_defaults" == "true" ]] && (( ${#def_specs[@]} > 0 )); then
+            if (( is_dir==1 )) && (( ${#def_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "true" "${def_specs[@]}" || rc=1
             fi
 
@@ -753,9 +783,9 @@ Config (excerpt):
         "recurse": true,
         "include_self": true,
         "match": { "types": ["file","directory"], "pattern_syntax": "glob", "include": ["**/*"], "exclude": [] },
-        "entries": { "files": [{"kind":"group","name":"team","perms":"rw-"}], "directories": [{"kind":"group","name":"team","perms":"rwx"}] },
+        "acl": { "files": [{"kind":"group","name":"team","mode":"rw-"}], "directories": [{"kind":"group","name":"team","mode":"rwx"}] },
         "apply_defaults": true,
-        "default_entries": [{"kind":"group","name":"team","perms":"rwx"}]
+        "default_acl": [{"kind":"group","name":"team","mode":"rwx"}]
       }
     ]
   }

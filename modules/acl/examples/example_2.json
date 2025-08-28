@@ -24,88 +24,30 @@
                     "**/tmp/**"
                 ]
             },
-            "entries": {
+            "acl": {
                 "directories": [
-                    {
-                        "kind": "owner",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "owning_group",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "app-admins",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "app-devs",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rwx"
-                    }
+                    "u::rwx",
+                    "g::r-x",
+                    "g:app-admins:rwx",
+                    "g:app-devs:r-x",
+                    "o::r-x",
+                    "m::rwx"
                 ],
                 "files": [
-                    {
-                        "kind": "owner",
-                        "perms": "rw-"
-                    },
-                    {
-                        "kind": "owning_group",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "app-admins",
-                        "perms": "rw-"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "app-devs",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rw-"
-                    }
+                    "u::rw-",
+                    "g::r--",
+                    "g:app-admins:rw-",
+                    "g:app-devs:r--",
+                    "o::r--",
+                    "m::rw-"
                 ]
             },
-            "apply_defaults": true,
-            "default_entries": [
-                {
-                    "kind": "owner",
-                    "perms": "rwx"
-                },
-                {
-                    "kind": "owning_group",
-                    "perms": "r-x"
-                },
-                {
-                    "kind": "group",
-                    "name": "app-admins",
-                    "perms": "rwx"
-                },
-                {
-                    "kind": "group",
-                    "name": "app-devs",
-                    "perms": "r-x"
-                },
-                {
-                    "kind": "mask",
-                    "perms": "rwx"
-                }
+            "default_acl": [
+                "u::rwx",
+                "g::r-x",
+                "g:app-admins:rwx",
+                "g:app-devs:r-x",
+                "m::rwx"
             ]
         },
         {
@@ -128,26 +70,12 @@
                     "**/archive/**"
                 ]
             },
-            "entries": {
+            "acl": {
                 "files": [
-                    {
-                        "kind": "group",
-                        "name": "app-ops",
-                        "perms": "rw-"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "app-admins",
-                        "perms": "rw-"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "---"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rw-"
-                    }
+                    "g:app-ops:rw-",
+                    "g:app-admins:rw-",
+                    "o::---",
+                    "m::rw-"
                 ]
             }
         },
@@ -169,16 +97,10 @@
                 ],
                 "case_sensitive": false
             },
-            "entries": {
+            "acl": {
                 "files": [
-                    {
-                        "kind": "other",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rw-"
-                    }
+                    "o::r--",
+                    "m::rw-"
                 ]
             }
         },
@@ -200,18 +122,10 @@
                 ],
                 "exclude": []
             },
-            "entries": {
+            "acl": {
                 "files": [
-                    {
-                        "kind": "group",
-                        "name": "app-admins",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "app-devs",
-                        "perms": "r-x"
-                    }
+                    "g:app-admins:rwx",
+                    "g:app-devs:r-x"
                 ]
             }
         },
@@ -234,25 +148,12 @@
                 ],
                 "match_base": true
             },
-            "entries": {
+            "acl": {
                 "files": [
-                    {
-                        "kind": "owner",
-                        "perms": "rw-"
-                    },
-                    {
-                        "kind": "group",
-                        "name": "app-devs",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r--"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rw-"
-                    }
+                    "u::rw-",
+                    "g:app-devs:r--",
+                    "o::r--",
+                    "m::rw-"
                 ]
             }
         },
@@ -276,38 +177,17 @@
                     "**/tmp/**"
                 ]
             },
-            "entries": {
+            "acl": {
                 "directories": [
-                    {
-                        "kind": "group",
-                        "name": "data-users",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "r-x"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rwx"
-                    }
+                    "g:data-users:rwx",
+                    "o::r-x",
+                    "m::rwx"
                 ]
             },
-            "apply_defaults": true,
-            "default_entries": [
-                {
-                    "kind": "group",
-                    "name": "data-users",
-                    "perms": "rwx"
-                },
-                {
-                    "kind": "other",
-                    "perms": "r-x"
-                },
-                {
-                    "kind": "mask",
-                    "perms": "rwx"
-                }
+            "default_acl": [
+                "g:data-users:rwx",
+                "o::r-x",
+                "m::rwx"
             ]
         },
         {
@@ -328,39 +208,18 @@
                     "**/*"
                 ]
             },
-            "entries": {
+            "acl": {
                 "directories": [
-                    {
-                        "kind": "group",
-                        "name": "data-users",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rwx"
-                    }
+                    "g:data-users:rwx",
+                    "o::rwx",
+                    "m::rwx"
                 ],
                 "files": [
-                    {
-                        "kind": "group",
-                        "name": "data-users",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "other",
-                        "perms": "rwx"
-                    },
-                    {
-                        "kind": "mask",
-                        "perms": "rwx"
-                    }
+                    "g:data-users:rwx",
+                    "o::rwx",
+                    "m::rwx"
                 ]
             }
         }
     ]
 }
-
