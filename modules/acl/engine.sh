@@ -38,6 +38,9 @@ declare -a target_paths=()
 declare -A json_cache=()
 declare -A color_codes=()
 
+# Performance optimization: cache parsed rule data
+declare -A rule_cache=()
+
 # Global counters for entry-level stats
 declare -i ENTRIES_ATTEMPTED=0
 declare -i ENTRIES_FAILED=0
@@ -200,16 +203,148 @@ get_json_data() {
     fi
 }
 
+# Validate that all groups referenced in the configuration exist
+validate_configuration_groups() {
+    if ! command -v getent >/dev/null 2>&1; then
+        log_warning "getent not available - skipping group existence validation"
+        return 0
+    fi
+    
+    log_info "Validating group existence..."
+    local groups_output
+    groups_output=$(jq -r '
+        [.rules[].entries | values | 
+         (.files[]?, .directories[]?, .default_entries[]? | select(.kind=="group") | .name)] | 
+        unique | .[]
+    ' "${CONFIG[definitions_file]}" 2>/dev/null) || {
+        log_warning "Could not extract groups from configuration for validation"
+        return 0
+    }
+    
+    local -a missing_groups=()
+    local group
+    while IFS= read -r group; do
+        [[ -n "$group" ]] || continue
+        if ! getent group "$group" >/dev/null 2>&1; then
+            missing_groups+=("$group")
+        fi
+    done <<< "$groups_output"
+    
+    if [[ ${#missing_groups[@]} -gt 0 ]]; then
+        log_warning "The following groups do not exist on the system:"
+        printf "  %s\n" "${missing_groups[@]}" >&2
+        log_warning "ACL application may fail. Create these groups or update the configuration."
+    else
+        log_info "All referenced groups exist on the system"
+    fi
+}
+
 # =============================================================================
-# RULES ACCESSORS (new schema)
+# RULES ACCESSORS (new schema) - Performance optimized
 # =============================================================================
 
+# Cache all rule data to minimize jq calls
+cache_all_rules() {
+    # Single jq pass that emits top-level info and all per-rule data as tagged lines
+    local output
+    output=$(jq -r '
+        def specfmt(x):
+            if x.kind=="user" then "u:\(x.name):\(x.perms)"
+            elif x.kind=="group" then "g:\(x.name):\(x.perms)"
+            elif x.kind=="owner" then "u::\(x.perms)"
+            elif x.kind=="owning_group" then "g::\(x.perms)"
+            elif x.kind=="other" then "o::\(x.perms)"
+            elif x.kind=="mask" then "m::\(x.perms)"
+            else empty end;
+        "apply_order|\(.apply_order // "shallow_to_deep")",
+        "rules_count|\(.rules|length)",
+        (.rules | to_entries[] as $e |
+            (
+                "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.apply_defaults // false)"
+            ),
+            ($e.value.roots // [] | .[] | "rule|\($e.key)|root|\(.)"),
+            ($e.value.entries.files // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|file_spec|\(.)"),
+            ($e.value.entries.directories // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|dir_spec|\(.)"),
+            ($e.value.default_entries // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|def_spec|\(.)"),
+            ($e.value.match.include // [] | .[] | "rule|\($e.key)|include|\(.)"),
+            ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)")
+        )
+    ' "${CONFIG[definitions_file]}") || fail "$EXIT_ERROR" "Failed to parse definitions file '${CONFIG[definitions_file]}'"
+
+    # Reset cache
+    local rules_count="0" apply_order="shallow_to_deep"
+
+    while IFS='|' read -r -a parts; do
+        [[ ${#parts[@]} -gt 0 ]] || continue
+        case "${parts[0]}" in
+            apply_order)
+                apply_order="${parts[1]}"
+                ;;
+            rules_count)
+                rules_count="${parts[1]}"
+                ;;
+            rule)
+                local idx="${parts[1]}"
+                local kind="${parts[2]}"
+                case "$kind" in
+                    params)
+                        # Store as TSV to preserve existing contract
+                        local tsv
+                        tsv="${parts[3]}"$'\t'"${parts[4]}"$'\t'"${parts[5]}"$'\t'"${parts[6]}"$'\t'"${parts[7]}"$'\t'"${parts[8]}"$'\t'"${parts[9]}"
+                        rule_cache["${idx}_params"]="$tsv"
+                        ;;
+                    root)
+                        if [[ -n "${rule_cache[${idx}_roots]:-}" ]]; then
+                            rule_cache["${idx}_roots"]+=$'\n'
+                        fi
+                        rule_cache["${idx}_roots"]+="${parts[3]}"
+                        ;;
+                    file_spec)
+                        if [[ -n "${rule_cache[${idx}_file_specs]:-}" ]]; then
+                            rule_cache["${idx}_file_specs"]+=$'\n'
+                        fi
+                        rule_cache["${idx}_file_specs"]+="${parts[3]}"
+                        ;;
+                    dir_spec)
+                        if [[ -n "${rule_cache[${idx}_dir_specs]:-}" ]]; then
+                            rule_cache["${idx}_dir_specs"]+=$'\n'
+                        fi
+                        rule_cache["${idx}_dir_specs"]+="${parts[3]}"
+                        ;;
+                    def_spec)
+                        if [[ -n "${rule_cache[${idx}_def_specs]:-}" ]]; then
+                            rule_cache["${idx}_def_specs"]+=$'\n'
+                        fi
+                        rule_cache["${idx}_def_specs"]+="${parts[3]}"
+                        ;;
+                    include)
+                        if [[ -n "${rule_cache[${idx}_includes]:-}" ]]; then
+                            rule_cache["${idx}_includes"]+=$'\n'
+                        fi
+                        rule_cache["${idx}_includes"]+="${parts[3]}"
+                        ;;
+                    exclude)
+                        if [[ -n "${rule_cache[${idx}_excludes]:-}" ]]; then
+                            rule_cache["${idx}_excludes"]+=$'\n'
+                        fi
+                        rule_cache["${idx}_excludes"]+="${parts[3]}"
+                        ;;
+                esac
+                ;;
+        esac
+    done <<< "$output"
+
+    # Store top-level values
+    rule_cache[rules_count]="$rules_count"
+    rule_cache[apply_order]="$apply_order"
+}
+
 get_apply_order() {
-    jq -r '.apply_order // "shallow_to_deep"' "${CONFIG[definitions_file]}"
+    echo "${rule_cache[apply_order]}"
 }
 
 get_rules_count() {
-    jq -r '.rules | length' "${CONFIG[definitions_file]}"
+    echo "${rule_cache[rules_count]}"
 }
 
 get_rule_roots() {
@@ -260,7 +395,16 @@ get_rule_default_specs() {
 # Pattern lists (newline-separated) for include/exclude
 get_rule_patterns() {
     local -r idx="$1" kind="$2" # kind: include|exclude
-    jq -r --argjson i "$idx" --arg kind "$kind" '.rules[$i].match[$kind] // [] | .[]' "${CONFIG[definitions_file]}"
+    local value=""
+    if [[ "$kind" == "include" ]]; then
+        value="${rule_cache[${idx}_includes]:-}"
+    elif [[ "$kind" == "exclude" ]]; then
+        value="${rule_cache[${idx}_excludes]:-}"
+    fi
+    # Only echo if value is not empty
+    if [[ -n "$value" ]]; then
+        echo "$value"
+    fi
 }
 
 # Optimized path operations
@@ -284,15 +428,25 @@ get_path_config() {
 # PATH OPERATIONS - Simplified and more efficient
 # =============================================================================
 
-# Sort paths by depth (shallow to deep) for proper ACL inheritance
+# Sort paths by depth (shallow to deep) for proper ACL inheritance - optimized
 sort_paths_by_depth() {
+    local reverse="false"
+    if [[ "${1:-}" == "--reverse" ]]; then
+        reverse="true"; shift
+    fi
+    local -a paths_with_depth=()
     while IFS= read -r path; do
         [[ -n "$path" ]] || continue
-        # Count directory separators to determine depth
-        local depth
-        depth=$(tr -cd '/' <<< "$path" | wc -c)
-        printf '%d\t%s\n' "$depth" "$path"
-    done | LC_ALL=C sort -n | cut -f2-
+        # Count directory separators to determine depth using bash parameter expansion
+        local path_without_slashes="${path//\//}"
+        local depth=$(( ${#path} - ${#path_without_slashes} ))
+        paths_with_depth+=("$depth|$path")
+    done
+    if [[ "$reverse" == "true" ]]; then
+        LC_ALL=C printf '%s\n' "${paths_with_depth[@]}" | sort -t'|' -rn | cut -d'|' -f2-
+    else
+        LC_ALL=C printf '%s\n' "${paths_with_depth[@]}" | sort -t'|' -n | cut -d'|' -f2-
+    fi
 }
 
 # Batch path validation for better performance
@@ -392,21 +546,31 @@ execute_setfacl() {
     shift 3
     local -ar args=("$@")
 
-    local suffix=""
-    [[ "$recursive" == "true" ]] && suffix=" (recursively)"
-
     if [[ "${CONFIG[dry_run]}" == "true" ]]; then
-        log_info "Dry-run: setfacl ${args[*]} -- \"$path\""
-        log_success "Applied ACL: $acl_entry$suffix (dry-run)"
         return "$RETURN_SUCCESS"
     fi
 
     local output
     if output=$(setfacl "${args[@]}" -- "$path" 2>&1); then
-        log_success "Applied ACL: $acl_entry$suffix"
         return "$RETURN_SUCCESS"
     else
-        log_error "Failed to apply ACL to '$path': $output"
+        local error_msg="setfacl failed for $path: $output"
+        log_error "$error_msg"
+        
+        # Provide helpful hints for common issues
+        if [[ "$output" =~ "Operation not supported" ]]; then
+            local fs_source
+            fs_source=$(df --output=source "$path" | tail -1)
+            # Safely quote the filesystem source for shell usage
+            local fs_source_quoted
+            fs_source_quoted=$(printf '%q' "$fs_source")
+            log_error "HINT: Filesystem may not support ACLs. Try: mount | grep $fs_source_quoted"
+        elif [[ "$output" =~ "Invalid argument" ]]; then
+            log_error "HINT: Group may not exist. Check with: getent group <groupname>"
+        elif [[ "$output" =~ "Operation not permitted" ]]; then
+            log_error "HINT: Insufficient permissions. Try running with sudo or check file ownership"
+        fi
+        
         return "$RETURN_FAILED"
     fi
 }
@@ -440,35 +604,76 @@ match_glob() {
     local -a patterns=("$@")
     local saved=0
     if shopt -q nocasematch; then saved=1; fi
+    local globstar_saved=0
+    if shopt -q globstar; then globstar_saved=1; fi
+    
+    # Enable globstar for ** patterns and set case sensitivity
+    shopt -s globstar
     if [[ "$cs" == "false" ]]; then shopt -s nocasematch; else shopt -u nocasematch; fi
+    
     for pat in "${patterns[@]}"; do
         [[ -z "$pat" ]] && continue
-        if [[ "$str" == $pat ]]; then
-            (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
-            return 0
-        fi
-        if [[ "$mb" == "true" ]] && [[ "$base" == $pat ]]; then
-            (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
-            return 0
+        # For patterns starting with **, also try matching without the **/ prefix
+        if [[ "$pat" == "**/"* ]]; then
+            local simple_pat="${pat#**/}"
+            if [[ "$str" == $simple_pat ]] || [[ "$str" == $pat ]]; then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
+            if [[ "$mb" == "true" ]] && ([[ "$base" == $simple_pat ]] || [[ "$base" == $pat ]]); then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
+        else
+            if [[ "$str" == $pat ]]; then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
+            if [[ "$mb" == "true" ]] && [[ "$base" == $pat ]]; then
+                # Restore settings
+                (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+                (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
+                return 0
+            fi
         fi
     done
+    # Restore settings
     (( saved==1 )) && shopt -s nocasematch || shopt -u nocasematch
+    (( globstar_saved==1 )) && shopt -s globstar || shopt -u globstar
     return 1
 }
 
 match_regex() {
     local -r str="$1" base="$2" cs="$3" mb="$4"; shift 4
     local -a patterns=("$@")
-    local flags="-E"
-    [[ "$cs" == "false" ]] && flags="-Ei"
-    for pat in "${patterns[@]}"; do
-        [[ -z "$pat" ]] && continue
-        echo "$str" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
-        if [[ "$mb" == "true" ]]; then
-            echo "$base" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
-        fi
-    done
-    return 1
+    if [[ "$cs" == "true" ]]; then
+        for pat in "${patterns[@]}"; do
+            [[ -z "$pat" ]] && continue
+            if [[ "$str" =~ $pat ]]; then
+                return 0
+            fi
+            if [[ "$mb" == "true" ]] && [[ "$base" =~ $pat ]]; then
+                return 0
+            fi
+        done
+        return 1
+    else
+        local flags="-Ei"
+        for pat in "${patterns[@]}"; do
+            [[ -z "$pat" ]] && continue
+            echo "$str" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
+            if [[ "$mb" == "true" ]]; then
+                echo "$base" | grep $flags -- "$pat" >/dev/null 2>&1 && return 0
+            fi
+        done
+        return 1
+    fi
 }
 
 filter_by_patterns() {
@@ -520,22 +725,64 @@ enumerate_candidates_for_rule() {
 apply_specs_to_path() {
     local -r path="$1" is_default="$2"; shift 2
     local -a specs=("$@")
-    local rc=0
+    [[ ${#specs[@]} -eq 0 ]] && return "$RETURN_SUCCESS"
+
+    # Deduplicate specs while preserving order
+    local -A seen=()
+    local -a unique_specs=()
+    local spec
     for spec in "${specs[@]}"; do
         [[ -z "$spec" ]] && continue
-        ENTRIES_ATTEMPTED=$((ENTRIES_ATTEMPTED+1))
-        local -a args
-        mapfile -t args < <(build_setfacl_args_default "$spec" "$is_default")
-        set +e
-        execute_setfacl "$path" "$spec" "false" "${args[@]}"
-        local r=$?
-        set -e
-        if [[ $r -ne 0 ]]; then
-            ENTRIES_FAILED=$((ENTRIES_FAILED+1))
-            rc=1
+        if [[ -z "${seen[$spec]:-}" ]]; then
+            seen[$spec]=1
+            unique_specs+=("$spec")
         fi
     done
-    [[ $rc -eq 0 ]] && return "$RETURN_SUCCESS" || return "$RETURN_FAILED"
+    [[ ${#unique_specs[@]} -eq 0 ]] && return "$RETURN_SUCCESS"
+
+    # Build shared flags once
+    local -a shared_flags=()
+    [[ "$is_default" == "true" ]] && shared_flags+=("-d")
+    [[ "${CONFIG[no_recalc_mask]}" == "true" ]] && shared_flags+=("-n")
+    if [[ "${CONFIG[mask_setting]}" == "explicit" ]]; then
+        shared_flags+=("-m" "m::${CONFIG[mask_explicit]}")
+    fi
+
+    # Chunk to avoid exceeding system arg limits.
+    # The chunk size is configurable via CONFIG[chunk_size]. Default is 64, chosen to stay well below typical ARG_MAX limits.
+    local chunk_size="${CONFIG[chunk_size]}"
+    local total=${#unique_specs[@]}
+    local start=0
+    local rc_total=0
+
+    while (( start < total )); do
+        local end=$(( start + chunk_size ))
+        (( end > total )) && end=$total
+        local -a args=("${shared_flags[@]}")
+        local i
+        for (( i=start; i<end; i++ )); do
+            args+=("-m" "${unique_specs[i]}")
+        done
+
+        local batch_count=$(( end - start ))
+        ENTRIES_ATTEMPTED=$((ENTRIES_ATTEMPTED + batch_count))
+
+        set +e
+        execute_setfacl "$path" "batch:$batch_count" "false" "${args[@]}"
+        local rc=$?
+        set -e
+        if [[ $rc -ne 0 ]]; then
+            ENTRIES_FAILED=$((ENTRIES_FAILED + batch_count))
+            rc_total=1
+            # continue to try remaining batches
+        fi
+        start=$end
+    done
+
+    if [[ $rc_total -ne 0 ]]; then
+        return "$RETURN_FAILED"
+    fi
+    return "$RETURN_SUCCESS"
 }
 
 apply_rules() {
@@ -559,14 +806,13 @@ apply_rules() {
         local -a candidates
         mapfile -t candidates < <(enumerate_candidates_for_rule "$recurse" "$include_self" "${roots[@]}")
         if [[ ${#candidates[@]} -eq 0 ]]; then
-            log_info "No candidates for this rule"
             continue
         fi
-        # sort by depth
+        # sort by depth using optimized bash-native function
         if [[ "$apply_order" == "deep_to_shallow" ]]; then
-            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | awk '{print gsub(/\//, "&"), $0}' | sort -rn | cut -d' ' -f2-)
+            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | sort_paths_by_depth --reverse)
         else
-            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | awk '{print gsub(/\//, "&"), $0}' | sort -n | cut -d' ' -f2-)
+            mapfile -t candidates < <(printf '%s\n' "${candidates[@]}" | sort_paths_by_depth)
         fi
 
         local want_files=0 want_dirs=0
@@ -615,8 +861,7 @@ apply_rules() {
             local rc=0
             local attempted_before=$ENTRIES_ATTEMPTED
             local failed_before=$ENTRIES_FAILED
-            log_bold ""
-            log_bold "---------- $path ----------"
+
             if (( is_file==1 && ${#file_specs[@]} > 0 )); then
                 apply_specs_to_path "$path" "false" "${file_specs[@]}" || rc=1
             fi
@@ -631,16 +876,16 @@ apply_rules() {
             local failed_delta=$((ENTRIES_FAILED - failed_before))
             if [[ $rc -eq 0 ]]; then
                 total_applied=$((total_applied+1))
-                log_success "Applied to $path (entries: $attempted_delta, failed: $failed_delta)"
+                # Single line per path for successful ACL application
+                log_success "$path"
             else
                 total_failed=$((total_failed+1))
-                log_error "Failed on $path (entries: $attempted_delta, failed: $failed_delta)"
+                log_error "$path"
             fi
-            log_bold ""
         done
     done
 
-    # Simplified concise summary
+    # Summary
     local entries_ok=$((ENTRIES_ATTEMPTED - ENTRIES_FAILED))
     local success_pct=100
     if [[ $ENTRIES_ATTEMPTED -gt 0 ]]; then
@@ -816,6 +1061,8 @@ initialize() {
     validate_dependencies
     init_colors
     validate_definitions_file
+    validate_configuration_groups  # Check that all groups exist
+    cache_all_rules  # Performance optimization: cache all rule data upfront
 }
 
 # Determine paths to process
