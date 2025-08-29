@@ -1,0 +1,12 @@
+{
+    "rules": [
+        {
+            "roots": "/tmp",
+            "recurse": false,
+            "include_self": true,
+            "acl": [
+                "g:test:rwx"
+            ]
+        }
+    ]
+}

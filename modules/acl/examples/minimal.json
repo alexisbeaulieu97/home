@@ -1,0 +1,10 @@
+{
+    "rules": [
+        {
+            "roots": "/tmp/test",
+            "acl": [
+                "g:users:rwx"
+            ]
+        }
+    ]
+}

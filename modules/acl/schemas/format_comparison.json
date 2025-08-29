@@ -1,0 +1,175 @@
+{
+    "version": "1.0",
+    "description": "Format comparison - showing different approaches for the same ACL configuration",
+    "examples": {
+        "current_format": {
+            "description": "Current format - concise but requires understanding of ACL syntax",
+            "rules": [
+                {
+                    "id": "app-permissions",
+                    "roots": "/srv/app",
+                    "recurse": true,
+                    "acl": {
+                        "files": [
+                            "u::rw-",
+                            "g::r--",
+                            "g:developers:rw-",
+                            "o::r--"
+                        ],
+                        "directories": [
+                            "u::rwx",
+                            "g::r-x",
+                            "g:developers:rwx",
+                            "o::r-x"
+                        ]
+                    },
+                    "default_acl": [
+                        "g:developers:rwx",
+                        "m::rwx"
+                    ]
+                }
+            ]
+        },
+        "alternative_1": {
+            "description": "Alternative 1 - More explicit, structured permissions",
+            "rules": [
+                {
+                    "id": "app-permissions",
+                    "roots": "/srv/app",
+                    "recurse": true,
+                    "permissions": {
+                        "files": {
+                            "owner": "rw-",
+                            "group": "r--",
+                            "others": "r--",
+                            "named_groups": [
+                                {
+                                    "name": "developers",
+                                    "permissions": "rw-"
+                                }
+                            ]
+                        },
+                        "directories": {
+                            "owner": "rwx",
+                            "group": "r-x",
+                            "others": "r-x",
+                            "named_groups": [
+                                {
+                                    "name": "developers",
+                                    "permissions": "rwx"
+                                }
+                            ]
+                        },
+                        "inheritance": {
+                            "default_permissions": [
+                                {
+                                    "name": "developers",
+                                    "permissions": "rwx"
+                                },
+                                {
+                                    "name": "mask",
+                                    "permissions": "rwx"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "alternative_2": {
+            "description": "Alternative 2 - Flat structure with type indicators",
+            "rules": [
+                {
+                    "id": "app-permissions",
+                    "roots": "/srv/app",
+                    "recurse": true,
+                    "acl_entries": [
+                        {
+                            "type": "file",
+                            "subject": "owner",
+                            "permissions": "rw-"
+                        },
+                        {
+                            "type": "file",
+                            "subject": "group",
+                            "permissions": "r--"
+                        },
+                        {
+                            "type": "file",
+                            "subject": "named_group",
+                            "name": "developers",
+                            "permissions": "rw-"
+                        },
+                        {
+                            "type": "file",
+                            "subject": "others",
+                            "permissions": "r--"
+                        },
+                        {
+                            "type": "directory",
+                            "subject": "owner",
+                            "permissions": "rwx"
+                        },
+                        {
+                            "type": "directory",
+                            "subject": "group",
+                            "permissions": "r-x"
+                        },
+                        {
+                            "type": "directory",
+                            "subject": "named_group",
+                            "name": "developers",
+                            "permissions": "rwx"
+                        },
+                        {
+                            "type": "directory",
+                            "subject": "others",
+                            "permissions": "r-x"
+                        }
+                    ],
+                    "default_acl": [
+                        {
+                            "subject": "named_group",
+                            "name": "developers",
+                            "permissions": "rwx"
+                        },
+                        {
+                            "subject": "mask",
+                            "permissions": "rwx"
+                        }
+                    ]
+                }
+            ]
+        },
+        "alternative_3": {
+            "description": "Alternative 3 - Permission matrix approach",
+            "rules": [
+                {
+                    "id": "app-permissions",
+                    "roots": "/srv/app",
+                    "recurse": true,
+                    "permission_matrix": {
+                        "files": {
+                            "owner": "rw-",
+                            "group": "r--",
+                            "developers": "rw-",
+                            "others": "r--"
+                        },
+                        "directories": {
+                            "owner": "rwx",
+                            "group": "r-x",
+                            "developers": "rwx",
+                            "others": "r-x"
+                        }
+                    },
+                    "inheritance": {
+                        "defaults": {
+                            "developers": "rwx",
+                            "mask": "rwx"
+                        }
+                    }
+                }
+            ]
+        }
+    }
+}

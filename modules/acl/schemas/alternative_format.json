@@ -1,0 +1,88 @@
+{
+    "version": "2.0",
+    "description": "Alternative format - more explicit and structured",
+    "apply_order": "shallow_to_deep",
+    "rules": [
+        {
+            "id": "web-app",
+            "description": "Web application permissions",
+            "targets": {
+                "paths": [
+                    "/srv/webapp",
+                    "/var/log/webapp"
+                ],
+                "recursion": {
+                    "enabled": true,
+                    "include_roots": true,
+                    "max_depth": null
+                }
+            },
+            "filters": {
+                "file_types": [
+                    "file",
+                    "directory"
+                ],
+                "patterns": {
+                    "syntax": "glob",
+                    "include": [
+                        "**/*"
+                    ],
+                    "exclude": [
+                        "*.tmp",
+                        ".git/**",
+                        "node_modules/**"
+                    ],
+                    "options": {
+                        "case_sensitive": true,
+                        "match_basename": true
+                    }
+                }
+            },
+            "permissions": {
+                "files": {
+                    "owner": "rw-",
+                    "group": "rw-",
+                    "others": "r--",
+                    "named_groups": [
+                        {
+                            "name": "developers",
+                            "permissions": "rw-"
+                        },
+                        {
+                            "name": "qa",
+                            "permissions": "r--"
+                        }
+                    ]
+                },
+                "directories": {
+                    "owner": "rwx",
+                    "group": "rwx",
+                    "others": "r-x",
+                    "named_groups": [
+                        {
+                            "name": "developers",
+                            "permissions": "rwx"
+                        },
+                        {
+                            "name": "qa",
+                            "permissions": "r-x"
+                        }
+                    ]
+                },
+                "inheritance": {
+                    "enabled": true,
+                    "default_permissions": [
+                        {
+                            "name": "developers",
+                            "permissions": "rwx"
+                        },
+                        {
+                            "name": "qa",
+                            "permissions": "r-x"
+                        }
+                    ]
+                }
+            }
+        }
+    ]
+}

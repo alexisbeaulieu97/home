@@ -31,6 +31,7 @@ declare -A CONFIG=(
     [dry_run]="false"
     [quiet]="false"
     [enable_colors]="true"
+    [chunk_size]="64"
 )
 
 # Runtime state
@@ -262,7 +263,7 @@ cache_all_rules() {
             (
                 "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.apply_defaults // false)"
             ),
-            ($e.value.roots // [] | .[] | "rule|\($e.key)|root|\(.)"),
+            ($e.value.roots as $r | if ($r|type)=="string" then $r else ($r[]) end | "rule|\($e.key)|root|\(.)"),
             ($e.value.entries.files // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|file_spec|\(.)"),
             ($e.value.entries.directories // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|dir_spec|\(.)"),
             ($e.value.default_entries // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|def_spec|\(.)"),

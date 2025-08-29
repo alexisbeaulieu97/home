@@ -1,0 +1,328 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://example.com/schemas/acl-config.schema.json",
+    "title": "ACL Configuration Schema",
+    "description": "Configuration for applying POSIX ACLs to filesystem paths with recursion, type-specific entries, defaults, and pattern-based matching.",
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+        "version": {
+            "type": "string",
+            "description": "Config version identifier.",
+            "pattern": "^1\\.\\d+(-[a-zA-Z0-9._-]+)?$",
+            "default": "1.0"
+        },
+        "apply_order": {
+            "type": "string",
+            "description": "Order to apply rules across paths: broad (shallow) first then specific (deep) or the reverse.",
+            "enum": [
+                "shallow_to_deep",
+                "deep_to_shallow"
+            ],
+            "default": "shallow_to_deep"
+        },
+        "rules": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "$ref": "#/$defs/rule"
+            }
+        }
+    },
+    "required": [
+        "rules"
+    ],
+    "$defs": {
+        "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "A filesystem path acting as a rule root. Can be absolute or relative."
+        },
+        "aclEntry": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "One ACL entry to apply.",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "user",
+                        "group",
+                        "owner",
+                        "owning_group",
+                        "other",
+                        "mask"
+                    ],
+                    "description": "Subject of the ACL entry. 'owner' maps to u::, 'owning_group' to g::, 'other' to o::, 'mask' to m::; 'user'/'group' require a name."
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Name for 'user' or 'group' entries. Not allowed for owner/owning_group/other/mask."
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Permission mode string (e.g. rwx, r-x, r--, ---). X is allowed for execute-on-directories/existing-exec.",
+                    "pattern": "^[rwxX-]{1,4}$"
+                }
+            },
+            "required": [
+                "kind",
+                "mode"
+            ],
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {
+                            "kind": {
+                                "enum": [
+                                    "user",
+                                    "group"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "kind"
+                        ]
+                    },
+                    "then": {
+                        "required": [
+                            "name"
+                        ]
+                    }
+                },
+                {
+                    "if": {
+                        "properties": {
+                            "kind": {
+                                "enum": [
+                                    "owner",
+                                    "owning_group",
+                                    "other",
+                                    "mask"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "kind"
+                        ]
+                    },
+                    "then": {
+                        "not": {
+                            "required": [
+                                "name"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "aclSpec": {
+            "description": "ACL entry in either object form (aclEntry) or short string form like 'g:team:r-x' or 'u::rw-'.",
+            "oneOf": [
+                {
+                    "$ref": "#/$defs/aclEntry"
+                },
+                {
+                    "type": "string",
+                    "pattern": "^[ugom]:([^:]*):[rwxX-]{1,4}$"
+                }
+            ]
+        },
+        "entriesByType": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "ACL entries to apply, separated by file system object type.",
+            "properties": {
+                "files": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/aclSpec"
+                    },
+                    "description": "Entries applied to files that match the rule."
+                },
+                "directories": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/aclSpec"
+                    },
+                    "description": "Entries applied to directories that match the rule."
+                }
+            },
+            "anyOf": [
+                {
+                    "required": [
+                        "files"
+                    ]
+                },
+                {
+                    "required": [
+                        "directories"
+                    ]
+                }
+            ]
+        },
+        "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Filter for which paths under roots are targeted.",
+            "properties": {
+                "types": {
+                    "type": "array",
+                    "items": {
+                        "enum": [
+                            "file",
+                            "directory"
+                        ]
+                    },
+                    "uniqueItems": true,
+                    "minItems": 1,
+                    "default": [
+                        "file",
+                        "directory"
+                    ],
+                    "description": "Which object types to target. Use only 'file' or 'directory' to scope application."
+                },
+                "pattern_syntax": {
+                    "type": "string",
+                    "enum": [
+                        "glob",
+                        "regex"
+                    ],
+                    "default": "glob",
+                    "description": "Syntax for include/exclude patterns."
+                },
+                "include": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [
+                        "**/*"
+                    ],
+                    "description": "Patterns to include; defaults to all."
+                },
+                "exclude": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": [],
+                    "description": "Patterns to exclude."
+                },
+                "match_base": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "If true, match patterns against the basename as well as the full path where applicable."
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Whether pattern matching is case sensitive."
+                }
+            }
+        },
+        "rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "description": "Identifier for the rule."
+                },
+                "description": {
+                    "type": "string"
+                },
+                "roots": {
+                    "oneOf": [
+                        {
+                            "$ref": "#/$defs/path"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/$defs/path"
+                            },
+                            "minItems": 1
+                        }
+                    ],
+                    "description": "Root(s) under which this rule applies."
+                },
+                "recurse": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Recurse under each root."
+                },
+                "include_self": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Apply ACL to the root objects themselves (true) or only to descendants (false)."
+                },
+                "match": {
+                    "$ref": "#/$defs/match"
+                },
+                "acl": {
+                    "oneOf": [
+                        {
+                            "$ref": "#/$defs/entriesByType"
+                        },
+                        {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/$defs/aclSpec"
+                            }
+                        }
+                    ],
+                    "description": "ACL entries, either shared for all types (array) or separated by file system object type (object)."
+                },
+                "default_acl": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/$defs/aclSpec"
+                    },
+                    "default": [],
+                    "description": "Default ACL entries to set on directories (inheritance for newly created children). Applied if present and non-empty."
+                }
+            },
+            "required": [
+                "roots",
+                "acl"
+            ]
+        }
+    },
+    "examples": [
+        {
+            "version": "1.0",
+            "apply_order": "shallow_to_deep",
+            "rules": [
+                {
+                    "id": "base-app",
+                    "description": "Base ACLs for app tree; broad first, specific rules override later.",
+                    "roots": [
+                        "/srv/app"
+                    ],
+                    "recurse": true,
+                    "include_self": true,
+                    "match": {
+                        "types": [
+                            "file",
+                            "directory"
+                        ],
+                        "pattern_syntax": "glob",
+                        "include": [
+                            "**/*"
+                        ],
+                        "exclude": []
+                    },
+                    "acl": [
+                        "g:devops:r--",
+                        "o::r--"
+                    ],
+                    "default_acl": [
+                        "g:devops:r-x",
+                        "m::r-x"
+                    ]
+                }
+            ]
+        }
+    ]
+}

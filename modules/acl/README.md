@@ -241,3 +241,43 @@ ls -la /path/to/target  # Check access
 - `2` - Invalid arguments
 - `3` - Missing dependencies
 - `4` - File error
+
+## Directory Structure
+
+```
+modules/acl/
+├── engine.sh              # Main ACL engine script
+├── README.md              # This documentation
+├── TESTING.md             # Testing documentation
+├── run_tests.sh           # Test runner script
+├── test_*.sh              # Unit and integration tests
+├── schemas/               # JSON schema and format analysis
+│   ├── schema.json        # JSON schema for validation
+│   ├── format_analysis.md # Analysis of different format approaches
+│   ├── format_comparison.json # Side-by-side format comparisons
+│   ├── alternative_format.json # Alternative format proposals
+│   └── README.md          # Schema documentation
+└── examples/              # Working configuration examples
+    ├── working_minimal.json # Simple working configuration
+    ├── clean_example_1.json # Complex multi-rule example
+    ├── minimal.json        # Minimal configuration template
+    └── README.md           # Examples documentation
+```
+
+### Schema Validation
+
+```bash
+# Validate your configuration against the schema
+jq -f schemas/schema.json your_config.json
+
+# Basic JSON validation
+jq . your_config.json
+```
+
+### Format Analysis
+
+For detailed analysis of different configuration formats and alternative proposals, see the `schemas/` directory. This includes:
+- Current format assessment and trade-offs
+- Alternative format proposals
+- Side-by-side comparisons
+- Recommendations for different use cases

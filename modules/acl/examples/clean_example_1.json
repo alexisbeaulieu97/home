@@ -69,63 +69,6 @@
                     "m::r-x"
                 ]
             }
-        },
-        {
-            "id": "logs-files-only",
-            "description": "Ops can read/write logs; others read-only; files only.",
-            "roots": [
-                "/srv/app/logs"
-            ],
-            "recurse": true,
-            "include_self": false,
-            "match": {
-                "types": [
-                    "file"
-                ],
-                "pattern_syntax": "glob",
-                "include": [
-                    "**/*"
-                ]
-            },
-            "acl": {
-                "files": [
-                    "g:ops:rw-",
-                    "o::r--",
-                    "m::rw-"
-                ]
-            }
-        },
-        {
-            "id": "data-dirs-only",
-            "description": "Make data directories writable by data group; do not touch files.",
-            "roots": [
-                "/data/share"
-            ],
-            "recurse": true,
-            "match": {
-                "types": [
-                    "directory"
-                ],
-                "pattern_syntax": "glob",
-                "include": [
-                    "**/*"
-                ],
-                "exclude": [
-                    "**/tmp/**"
-                ]
-            },
-            "acl": {
-                "directories": [
-                    "g:data:rwx",
-                    "g::rwx",
-                    "o::r-x",
-                    "m::rwx"
-                ]
-            },
-            "default_acl": [
-                "g:data:rwx",
-                "m::rwx"
-            ]
         }
     ]
 }
