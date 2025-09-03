@@ -824,7 +824,7 @@ apply_specs_to_path() {
         ENTRIES_ATTEMPTED=$((ENTRIES_ATTEMPTED + batch_count))
 
         set +e
-        execute_setfacl "$path" "batch:$batch_count" "false" "${args[@]}"
+        execute_setfacl "$path" "false" "${args[@]}"
         local rc=$?
         set -e
         if [[ $rc -ne 0 ]]; then
