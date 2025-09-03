@@ -282,8 +282,15 @@ cache_all_rules() {
                 "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.apply_defaults // false)"
             ),
             ($e.value.roots as $r | if ($r|type)=="string" then $r else ($r[]) end | "rule|\($e.key)|root|\(.)"),
-            ($e.value.acl as $acl | if ($acl|type)=="array" then ($acl | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|file_spec|\(.)", "rule|\($e.key)|dir_spec|\(.)") else (($acl.files // []) | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|file_spec|\(.)", (($acl.directories // []) | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|dir_spec|\(.)")) end),
-            ($e.value.default_acl // [] | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|def_spec|\(.)"),
+            ($e.value.acl as $acl | 
+                if ($acl|type)=="array" then 
+                    ($acl | .[] | if type == "string" then . else specfmt(.) end | select(length>0) | "rule|\($e.key)|file_spec|\(.)", "rule|\($e.key)|dir_spec|\(.)")
+                else 
+                    (($acl.files // []) | .[] | if type == "string" then . else specfmt(.) end | select(length>0) | "rule|\($e.key)|file_spec|\(.)")?,
+                    (($acl.directories // []) | .[] | if type == "string" then . else specfmt(.) end | select(length>0) | "rule|\($e.key)|dir_spec|\(.)")?
+                end
+            ),
+            ($e.value.default_acl // [] | .[] | if type == "string" then . else specfmt(.) end | select(length>0) | "rule|\($e.key)|def_spec|\(.)"),
             ($e.value.match.include // [] | .[] | "rule|\($e.key)|include|\(.)"),
             ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)"),
             ("rule|\($e.key)|acl_type|\($e.value.acl | type)"),
