@@ -294,8 +294,8 @@ cache_all_rules() {
             ($e.value.match.include // [] | .[] | "rule|\($e.key)|include|\(.)"),
             ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)"),
             ("rule|\($e.key)|acl_type|\($e.value.acl | type)"),
-            ("rule|\($e.key)|has_files|\(if ($e.value.acl | type) == \"object\" then (($e.value.acl.files // [])|length) > 0 else false end)"),
-            ("rule|\($e.key)|has_dirs|\(if ($e.value.acl | type) == \"object\" then (($e.value.acl.directories // [])|length) > 0 else false end)")
+            ("rule|\($e.key)|has_files|\(if ($e.value.acl | type) == "object" then (($e.value.acl.files // [])|length) > 0 else false end)"),
+            ("rule|\($e.key)|has_dirs|\(if ($e.value.acl | type) == "object" then (($e.value.acl.directories // [])|length) > 0 else false end)")
         )
     ' "${CONFIG[definitions_file]}") || fail "$EXIT_ERROR" "Failed to parse definitions file '${CONFIG[definitions_file]}'"
 
