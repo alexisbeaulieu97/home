@@ -601,6 +601,8 @@ execute_setfacl() {
     local -ar args=("$@")
 
     if [[ "${CONFIG[dry_run]}" == "true" ]]; then
+        # Log the command that would be executed in dry-run mode
+        log_info "DRY-RUN: setfacl ${args[*]} -- \"$path\""
         return "$RETURN_SUCCESS"
     fi
 
