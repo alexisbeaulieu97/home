@@ -42,6 +42,12 @@ declare -A color_codes=()
 # Performance optimization: cache parsed rule data
 declare -A rule_cache=()
 
+# Performance optimization: cache path existence and other frequently accessed data  
+declare -A path_cache=()
+
+# Performance optimization: cache group existence checks
+declare -A group_cache=()
+
 # Global counters for entry-level stats
 declare -i ENTRIES_ATTEMPTED=0
 declare -i ENTRIES_FAILED=0
@@ -196,7 +202,7 @@ get_json_data() {
 
     # Execute query and cache result
     local result
-    if result=$(jq -r -f - "${jq_args[@]}" "$file" <<<"$jq_filter" 2>&1); then
+    if result=$(jq -r "${jq_args[@]}" "$jq_filter" "$file" 2>&1); then
         json_cache[$cache_key]="$result"
         echo "$result"
     else
@@ -226,8 +232,20 @@ validate_configuration_groups() {
     local group
     while IFS= read -r group; do
         [[ -n "$group" ]] || continue
-        if ! getent group "$group" >/dev/null 2>&1; then
-            missing_groups+=("$group")
+        
+        # Check cache first
+        if [[ -n "${group_cache[$group]:-}" ]]; then
+            if [[ "${group_cache[$group]}" == "missing" ]]; then
+                missing_groups+=("$group")
+            fi
+        else
+            # Check and cache result
+            if ! getent group "$group" >/dev/null 2>&1; then
+                group_cache[$group]="missing"
+                missing_groups+=("$group")
+            else
+                group_cache[$group]="exists"
+            fi
         fi
     done <<< "$groups_output"
     
@@ -250,12 +268,12 @@ cache_all_rules() {
     local output
     output=$(jq -r '
         def specfmt(x):
-            if x.kind=="user" then "u:\(x.name):\(x.perms)"
-            elif x.kind=="group" then "g:\(x.name):\(x.perms)"
-            elif x.kind=="owner" then "u::\(x.perms)"
-            elif x.kind=="owning_group" then "g::\(x.perms)"
-            elif x.kind=="other" then "o::\(x.perms)"
-            elif x.kind=="mask" then "m::\(x.perms)"
+            if x.kind=="user" then "u:\(x.name):\(x.mode)"
+            elif x.kind=="group" then "g:\(x.name):\(x.mode)"
+            elif x.kind=="owner" then "u::\(x.mode)"
+            elif x.kind=="owning_group" then "g::\(x.mode)"
+            elif x.kind=="other" then "o::\(x.mode)"
+            elif x.kind=="mask" then "m::\(x.mode)"
             else empty end;
         "apply_order|\(.apply_order // "shallow_to_deep")",
         "rules_count|\(.rules|length)",
@@ -264,11 +282,13 @@ cache_all_rules() {
                 "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.apply_defaults // false)"
             ),
             ($e.value.roots as $r | if ($r|type)=="string" then $r else ($r[]) end | "rule|\($e.key)|root|\(.)"),
-            ($e.value.entries.files // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|file_spec|\(.)"),
-            ($e.value.entries.directories // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|dir_spec|\(.)"),
-            ($e.value.default_entries // [] | .[] | (specfmt(.)) | select(length>0) | "rule|\($e.key)|def_spec|\(.)"),
+            ($e.value.acl as $acl | if ($acl|type)=="array" then ($acl | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|file_spec|\(.)", "rule|\($e.key)|dir_spec|\(.)") else (($acl.files // []) | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|file_spec|\(.)", (($acl.directories // []) | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|dir_spec|\(.)")) end),
+            ($e.value.default_acl // [] | .[] | specfmt(.) | select(length>0) | "rule|\($e.key)|def_spec|\(.)"),
             ($e.value.match.include // [] | .[] | "rule|\($e.key)|include|\(.)"),
-            ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)")
+            ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)"),
+            ("rule|\($e.key)|acl_type|\($e.value.acl | type)"),
+            ("rule|\($e.key)|has_files|\((($e.value.acl.files // [])|length) > 0)"),
+            ("rule|\($e.key)|has_dirs|\((($e.value.acl.directories // [])|length) > 0)")
         )
     ' "${CONFIG[definitions_file]}") || fail "$EXIT_ERROR" "Failed to parse definitions file '${CONFIG[definitions_file]}'"
 
@@ -330,6 +350,15 @@ cache_all_rules() {
                         fi
                         rule_cache["${idx}_excludes"]+="${parts[3]}"
                         ;;
+                    acl_type)
+                        rule_cache["${idx}_acl_type"]="${parts[3]}"
+                        ;;
+                    has_files)
+                        rule_cache["${idx}_has_files"]="${parts[3]}"
+                        ;;
+                    has_dirs)
+                        rule_cache["${idx}_has_dirs"]="${parts[3]}"
+                        ;;
                 esac
                 ;;
         esac
@@ -350,47 +379,45 @@ get_rules_count() {
 
 get_rule_roots() {
     local -r idx="$1"
-    jq -r --argjson i "$idx" '
-      .rules[$i].roots as $r | if ($r|type)=="string" then $r else ($r[]) end
-    ' "${CONFIG[definitions_file]}"
+    # Use cached data instead of direct jq call
+    local value="${rule_cache[${idx}_roots]:-}"
+    if [[ -n "$value" ]]; then
+        echo "$value"
+    fi
 }
 
 get_rule_params_tsv() {
     local -r idx="$1"
-    jq -r \
-      --argjson i "$idx" \
-      '.rules[$i] as $r | [($r.recurse // false), ($r.include_self // true), ((($r.match.types // ["file","directory"]) | join(","))), ($r.match.pattern_syntax // "glob"), ($r.match.match_base // true), ($r.match.case_sensitive // true)] | @tsv' \
-      "${CONFIG[definitions_file]}"
+    # Use cached data instead of direct jq call
+    local value="${rule_cache[${idx}_params]:-}"
+    if [[ -n "$value" ]]; then
+        echo "$value"
+    fi
 }
 
 # Returns newline-separated setfacl specs for entries of a given type: files|directories
 get_rule_entry_specs() {
     local -r idx="$1" type="$2"
-    jq -r \
-      --argjson i "$idx" --arg type "$type" \
-      '
-      .rules[$i].acl as $acl
-      | if ($acl|type)=="array" then $acl else ($acl[$type] // []) end
-      | .[]
-      | if (type=="string") then .
-        else if .kind == "user" then "u:\(.name):\(.mode)"
-        elif .kind == "group" then "g:\(.name):\(.mode)"
-        elif .kind == "owner" then "u::\(.mode)"
-        elif .kind == "owning_group" then "g::\(.mode)"
-        elif .kind == "other" then "o::\(.mode)"
-        elif .kind == "mask" then "m::\(.mode)"
-        else empty end
-        end' \
-      "${CONFIG[definitions_file]}"
+    # Use cached data instead of direct jq call
+    local value=""
+    if [[ "$type" == "files" ]]; then
+        value="${rule_cache[${idx}_file_specs]:-}"
+    elif [[ "$type" == "directories" ]]; then
+        value="${rule_cache[${idx}_dir_specs]:-}"
+    fi
+    if [[ -n "$value" ]]; then
+        echo "$value"
+    fi
 }
 
 # Returns newline-separated setfacl specs for default entries (directories only)
 get_rule_default_specs() {
     local -r idx="$1"
-    jq -r \
-      --argjson i "$idx" \
-      '.rules[$i].default_acl // [] | .[] | if (type=="string") then . else if .kind == "user" then "u:\(.name):\(.mode)" elif .kind == "group" then "g:\(.name):\(.mode)" elif .kind == "owner" then "u::\(.mode)" elif .kind == "owning_group" then "g::\(.mode)" elif .kind == "other" then "o::\(.mode)" elif .kind == "mask" then "m::\(.mode)" else empty end end' \
-      "${CONFIG[definitions_file]}"
+    # Use cached data instead of direct jq call
+    local value="${rule_cache[${idx}_def_specs]:-}"
+    if [[ -n "$value" ]]; then
+        echo "$value"
+    fi
 }
 
 # Pattern lists (newline-separated) for include/exclude
@@ -415,7 +442,21 @@ get_all_paths() {
 
 path_exists_in_definitions() {
     local -r path="$1"
-    jq -e --arg path "$path" 'has($path)' "${CONFIG[definitions_file]}" &>/dev/null
+    local cache_key="path_exists_${path}"
+    
+    # Return cached result if available
+    if [[ -n "${path_cache[$cache_key]:-}" ]]; then
+        return "${path_cache[$cache_key]}"
+    fi
+    
+    # Check path existence and cache result
+    if jq -e --arg path "$path" 'has($path)' "${CONFIG[definitions_file]}" &>/dev/null; then
+        path_cache[$cache_key]=0
+        return 0
+    else
+        path_cache[$cache_key]=1
+        return 1
+    fi
 }
 
 get_path_config() {
@@ -478,10 +519,22 @@ validate_acl_config() {
     is_valid_group "$group" || fail "$EXIT_ERROR" "Invalid group name '$group' for path '$path'. Use alphanumeric characters, underscores, and hyphens only."
     is_valid_perms "$perms" || log_warning "Unusual permissions format '$perms' for '$path' (expected combinations of r, w, x, X, -)."
 
-    # Group existence check (if getent available)
+    # Group existence check (if getent available) - with caching
     if command -v getent >/dev/null 2>&1; then
-        getent group "$group" >/dev/null 2>&1 || 
-            log_warning "Group '$group' does not exist on system (ensure it exists before running)"
+        # Check cache first
+        if [[ -n "${group_cache[$group]:-}" ]]; then
+            if [[ "${group_cache[$group]}" == "missing" ]]; then
+                log_warning "Group '$group' does not exist on system (ensure it exists before running)"
+            fi
+        else
+            # Check and cache result
+            if getent group "$group" >/dev/null 2>&1; then
+                group_cache[$group]="exists"
+            else
+                group_cache[$group]="missing"
+                log_warning "Group '$group' does not exist on system (ensure it exists before running)"
+            fi
+        fi
     fi
 }
 
@@ -818,15 +871,13 @@ apply_rules() {
 
         local want_files=0 want_dirs=0
         if [[ -z "$types_csv" || "$types_csv" == "," ]]; then
-            # Infer from ACL shape when types not provided
-            local acl_type
-            acl_type=$(jq -r --argjson i "$i" '.rules[$i].acl | type' "${CONFIG[definitions_file]}")
+            # Infer from ACL shape when types not provided - use cached data
+            local acl_type="${rule_cache[${i}_acl_type]:-}"
             if [[ "$acl_type" == "array" ]]; then
                 want_files=1; want_dirs=1
             else
-                local has_files has_dirs
-                has_files=$(jq -r --argjson i "$i" '((.rules[$i].acl.files // [])|length) > 0' "${CONFIG[definitions_file]}")
-                has_dirs=$(jq -r --argjson i "$i" '((.rules[$i].acl.directories // [])|length) > 0' "${CONFIG[definitions_file]}")
+                local has_files="${rule_cache[${i}_has_files]:-false}"
+                local has_dirs="${rule_cache[${i}_has_dirs]:-false}"
                 [[ "$has_files" == "true" ]] && want_files=1
                 [[ "$has_dirs" == "true" ]] && want_dirs=1
                 if (( want_files==0 && want_dirs==0 )); then want_files=1; want_dirs=1; fi
