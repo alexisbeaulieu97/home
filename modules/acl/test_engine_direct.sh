@@ -1148,7 +1148,7 @@ main() {
 }
 
 # Entry point - only execute if run directly
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    main "$@"
-fi
+# if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+#     main "$@"
+# fi
 
