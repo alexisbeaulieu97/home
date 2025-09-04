@@ -173,6 +173,12 @@ validate_definitions_file() {
 
     [[ -n "$file" ]] || fail "$EXIT_INVALID_ARGS" "Definitions file is required. Use: $SCRIPT_NAME -f <file>"
     is_readable_file "$file" || fail "$EXIT_FILE_ERROR" "Cannot read definitions file '$file'. Check file exists and has read permissions."
+    
+    # Check for common YAML file patterns that shouldn't be processed as JSON
+    if [[ "$file" =~ \.(yml|yaml)$ ]]; then
+        fail "$EXIT_FILE_ERROR" "YAML files are not supported. Please use JSON format instead of '$file'."
+    fi
+    
     is_valid_json "$file" || fail "$EXIT_FILE_ERROR" "Invalid JSON syntax in '$file'. Use 'jq .' to validate JSON format."
 
     # Validate minimal structure for new schema: object with non-empty rules array
@@ -220,9 +226,32 @@ validate_configuration_groups() {
     log_info "Validating group existence..."
     local groups_output
     groups_output=$(jq -r '
-        [.rules[].entries | values | 
-         (.files[]?, .directories[]?, .default_entries[]? | select(.kind=="group") | .name)] | 
-        unique | .[]
+        [.rules[] | 
+         # Extract groups from ACL entries
+         (.acl // [] | 
+          if type == "array" then
+            # Handle array format: ["g:groupname:perms", {...}]
+            .[] | if type == "string" then 
+              # Parse string format "g:groupname:perms"
+              select(startswith("g:")) | split(":")[1] 
+            else 
+              # Parse object format {"kind":"group","name":"groupname",...}
+              select(.kind == "group") | .name 
+            end
+          else
+            # Handle object format: {"files":[...], "directories":[...]}
+            ((.files // []) + (.directories // []) | .[] | select(.kind == "group") | .name)
+          end
+         ),
+         # Extract groups from default_acl
+         (.default_acl // [] | .[] | 
+          if type == "string" then
+            select(startswith("g:")) | split(":")[1]
+          else
+            select(.kind == "group") | .name
+          end
+         )
+        ] | unique | .[]
     ' "${CONFIG[definitions_file]}" 2>/dev/null) || {
         log_warning "Could not extract groups from configuration for validation"
         return 0
@@ -287,8 +316,8 @@ cache_all_rules() {
             ($e.value.match.include // [] | .[] | "rule|\($e.key)|include|\(.)"),
             ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)"),
             ("rule|\($e.key)|acl_type|\($e.value.acl | type)"),
-            ("rule|\($e.key)|has_files|\((($e.value.acl.files // [])|length) > 0)"),
-            ("rule|\($e.key)|has_dirs|\((($e.value.acl.directories // [])|length) > 0)")
+            ("rule|\($e.key)|has_files|\(if ($e.value.acl | type) == "array" then false else ((($e.value.acl.files // [])|length) > 0) end)"),
+            ("rule|\($e.key)|has_dirs|\(if ($e.value.acl | type) == "array" then false else ((($e.value.acl.directories // [])|length) > 0) end)")
         )
     ' "${CONFIG[definitions_file]}") || fail "$EXIT_ERROR" "Failed to parse definitions file '${CONFIG[definitions_file]}'"
 
@@ -1110,10 +1139,26 @@ EOF
 # MAIN ORCHESTRATION - Simplified and clear
 # =============================================================================
 
+# Check for problematic test files that might cause confusion
+check_for_problematic_files() {
+    local yaml_files
+    yaml_files=$(find . -maxdepth 1 -name "test*.yml" -o -name "test*.yaml" 2>/dev/null) || true
+    
+    if [[ -n "$yaml_files" ]]; then
+        log_warning "Found YAML test files in current directory that might cause issues:"
+        while IFS= read -r file; do
+            [[ -n "$file" ]] && log_warning "  - $file"
+        done <<< "$yaml_files"
+        log_warning "These files should be removed or moved to avoid jq processing errors."
+        log_warning "YAML files are not supported - please use JSON format instead."
+    fi
+}
+
 # Initialize runtime environment
 initialize() {
     validate_dependencies
     init_colors
+    check_for_problematic_files
     validate_definitions_file
     validate_configuration_groups  # Check that all groups exist
     cache_all_rules  # Performance optimization: cache all rule data upfront

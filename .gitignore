@@ -7,6 +7,12 @@ __pycache__/
 
 # test artifacts
 test.yml
+test.yaml
 test.json
+test_*.yml
+test_*.yaml
+test_*.json
 *.tmp
+.test/
+temp_test_*
 
