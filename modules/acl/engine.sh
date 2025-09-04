@@ -51,6 +51,8 @@ declare -A RUNTIME_STATE=(
     [total_applied]="0"
     [total_failed]="0"
     [total_skipped]="0"
+    [bulk_operations]="0"
+    [bulk_verbose_threshold]="10"
 )
 
 declare -a target_paths=()
@@ -253,8 +255,9 @@ log_info()       { _log_unless_quiet blue 2 "INFO: " "$*"; }
 log_success()    { _log_unless_quiet green 2 "SUCCESS: " "$*"; }
 log_error()      { _log red 2 "ERROR: " "$*"; }
 log_warning()    { _log yellow 2 "WARNING: " "$*"; }
-log_processing() { _log_unless_quiet cyan 2 "PROCESSING: " "$*"; }
+log_processing() { _log_unless_quiet cyan 2 "PROCESSING: " "$*"; exec 2>&2; }  # Force flush
 log_bold()       { _log_unless_quiet bold 2 "" "$*"; }
+log_progress()   { _log_unless_quiet blue 2 "PROGRESS: " "$*"; }
 
 # =============================================================================
 # ERROR HANDLING SERVICE
@@ -482,10 +485,29 @@ execute_setfacl() {
     local -a cmd_args
     mapfile -t cmd_args < <(build_setfacl_command "$path" "$is_default" "${specs[@]}")
     
+    # Track bulk operations for progress reporting
+    RUNTIME_STATE[bulk_operations]=$((${RUNTIME_STATE[bulk_operations]} + 1))
+    local bulk_ops=${RUNTIME_STATE[bulk_operations]}
+    local verbose_threshold=${RUNTIME_STATE[bulk_verbose_threshold]}
+    
     if [[ "${CONFIG[dry_run]}" == "true" ]]; then
-        log_info "DRY-RUN: ${cmd_args[*]}"
+        # Only log individual operations if under threshold or at specific intervals
+        if [[ $bulk_ops -le $verbose_threshold ]] || [[ $((bulk_ops % 50)) -eq 0 ]]; then
+            if [[ $bulk_ops -gt $verbose_threshold ]]; then
+                log_progress "Processed $bulk_ops individual paths..."
+            else
+                log_info "DRY-RUN: ${cmd_args[*]}"
+            fi
+        fi
         RUNTIME_STATE[entries_attempted]=$((${RUNTIME_STATE[entries_attempted]} + ${#specs[@]}))
         return 0
+    fi
+    
+    # Show progress for real operations too
+    if [[ $bulk_ops -le $verbose_threshold ]] || [[ $((bulk_ops % 50)) -eq 0 ]]; then
+        if [[ $bulk_ops -gt $verbose_threshold ]]; then
+            log_progress "Applied ACLs to $bulk_ops individual paths..."
+        fi
     fi
     
     if "${cmd_args[@]}" 2>&1; then
@@ -689,7 +711,22 @@ execute_rule() {
             else
                 # For individual strategy, enumerate paths and filter files
                 local -a paths
+                log_progress "Enumerating paths for individual file processing..."
                 mapfile -t paths < <(enumerate_paths_simple "$recurse" "$include_self" "$root")
+                local file_count=0
+                for path in "${paths[@]}"; do
+                    path_under_any_filter "$path" || continue
+                    local path_type
+                    path_type=$(get_path_type "$path")
+                    [[ "$path_type" == "file" ]] || continue
+                    ((file_count++))
+                done
+                if [[ $file_count -gt 0 ]]; then
+                    log_progress "Processing $file_count files individually..."
+                fi
+                
+                # Reset bulk operations counter for this section
+                RUNTIME_STATE[bulk_operations]=0
                 for path in "${paths[@]}"; do
                     path_under_any_filter "$path" || continue
                     local path_type
@@ -710,7 +747,22 @@ execute_rule() {
                 fi
             else
                 local -a paths
+                log_progress "Enumerating paths for individual directory processing..."
                 mapfile -t paths < <(enumerate_paths_simple "$recurse" "$include_self" "$root")
+                local dir_count=0
+                for path in "${paths[@]}"; do
+                    path_under_any_filter "$path" || continue
+                    local path_type
+                    path_type=$(get_path_type "$path")
+                    [[ "$path_type" == "directory" ]] || continue
+                    ((dir_count++))
+                done
+                if [[ $dir_count -gt 0 ]]; then
+                    log_progress "Processing $dir_count directories individually..."
+                fi
+                
+                # Reset bulk operations counter for this section  
+                RUNTIME_STATE[bulk_operations]=0
                 for path in "${paths[@]}"; do
                     path_under_any_filter "$path" || continue
                     local path_type
@@ -731,7 +783,20 @@ execute_rule() {
                 fi
             else
                 local -a paths
+                log_progress "Enumerating paths for default ACL processing..."
                 mapfile -t paths < <(enumerate_paths_simple "$recurse" "$include_self" "$root")
+                local default_dir_count=0
+                for path in "${paths[@]}"; do
+                    path_under_any_filter "$path" || continue
+                    [[ -d "$path" ]] || continue
+                    ((default_dir_count++))
+                done
+                if [[ $default_dir_count -gt 0 ]]; then
+                    log_progress "Processing default ACLs for $default_dir_count directories individually..."
+                fi
+                
+                # Reset bulk operations counter for this section
+                RUNTIME_STATE[bulk_operations]=0
                 for path in "${paths[@]}"; do
                     path_under_any_filter "$path" || continue
                     [[ -d "$path" ]] || continue
