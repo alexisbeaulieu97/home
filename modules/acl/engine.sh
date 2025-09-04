@@ -240,7 +240,15 @@ validate_configuration_groups() {
             end
           else
             # Handle object format: {"files":[...], "directories":[...]}
-            ((.files // []) + (.directories // []) | .[] | select(.kind == "group") | .name)
+            ((.files // []) + (.directories // []) | .[] | 
+             if type == "string" then
+               # Parse string format "g:groupname:perms"
+               select(startswith("g:")) | split(":")[1]
+             else
+               # Parse object format {"kind":"group","name":"groupname",...}
+               select(.kind == "group") | .name
+             end
+            )
           end
          ),
          # Extract groups from default_acl
