@@ -173,6 +173,12 @@ validate_definitions_file() {
 
     [[ -n "$file" ]] || fail "$EXIT_INVALID_ARGS" "Definitions file is required. Use: $SCRIPT_NAME -f <file>"
     is_readable_file "$file" || fail "$EXIT_FILE_ERROR" "Cannot read definitions file '$file'. Check file exists and has read permissions."
+    
+    # Check for common YAML file patterns that shouldn't be processed as JSON
+    if [[ "$file" =~ \.(yml|yaml)$ ]]; then
+        fail "$EXIT_FILE_ERROR" "YAML files are not supported. Please use JSON format instead of '$file'."
+    fi
+    
     is_valid_json "$file" || fail "$EXIT_FILE_ERROR" "Invalid JSON syntax in '$file'. Use 'jq .' to validate JSON format."
 
     # Validate minimal structure for new schema: object with non-empty rules array
@@ -220,9 +226,40 @@ validate_configuration_groups() {
     log_info "Validating group existence..."
     local groups_output
     groups_output=$(jq -r '
-        [.rules[].entries | values | 
-         (.files[]?, .directories[]?, .default_entries[]? | select(.kind=="group") | .name)] | 
-        unique | .[]
+        [.rules[] | 
+         # Extract groups from ACL entries
+         (.acl // [] | 
+          if type == "array" then
+            # Handle array format: ["g:groupname:perms", {...}]
+            .[] | if type == "string" then 
+              # Parse string format "g:groupname:perms"
+              select(startswith("g:")) | split(":")[1] 
+            else 
+              # Parse object format {"kind":"group","name":"groupname",...}
+              select(.kind == "group") | .name 
+            end
+          else
+            # Handle object format: {"files":[...], "directories":[...]}
+            ((.files // []) + (.directories // []) | .[] | 
+             if type == "string" then
+               # Parse string format "g:groupname:perms"
+               select(startswith("g:")) | split(":")[1]
+             else
+               # Parse object format {"kind":"group","name":"groupname",...}
+               select(.kind == "group") | .name
+             end
+            )
+          end
+         ),
+         # Extract groups from default_acl
+         (.default_acl // [] | .[] | 
+          if type == "string" then
+            select(startswith("g:")) | split(":")[1]
+          else
+            select(.kind == "group") | .name
+          end
+         )
+        ] | unique | .[]
     ' "${CONFIG[definitions_file]}" 2>/dev/null) || {
         log_warning "Could not extract groups from configuration for validation"
         return 0
@@ -294,8 +331,8 @@ cache_all_rules() {
             ($e.value.match.include // [] | .[] | "rule|\($e.key)|include|\(.)"),
             ($e.value.match.exclude // [] | .[] | "rule|\($e.key)|exclude|\(.)"),
             ("rule|\($e.key)|acl_type|\($e.value.acl | type)"),
-            ("rule|\($e.key)|has_files|\((($e.value.acl.files // [])|length) > 0)"),
-            ("rule|\($e.key)|has_dirs|\((($e.value.acl.directories // [])|length) > 0)")
+            ("rule|\($e.key)|has_files|\(if ($e.value.acl | type) == "array" then false else ((($e.value.acl.files // [])|length) > 0) end)"),
+            ("rule|\($e.key)|has_dirs|\(if ($e.value.acl | type) == "array" then false else ((($e.value.acl.directories // [])|length) > 0) end)")
         )
     ' "${CONFIG[definitions_file]}") || fail "$EXIT_ERROR" "Failed to parse definitions file '${CONFIG[definitions_file]}'"
 
@@ -608,6 +645,8 @@ execute_setfacl() {
     local -ar args=("$@")
 
     if [[ "${CONFIG[dry_run]}" == "true" ]]; then
+        # Log the command that would be executed in dry-run mode
+        log_info "DRY-RUN: setfacl ${args[*]} -- \"$path\""
         return "$RETURN_SUCCESS"
     fi
 
@@ -783,6 +822,149 @@ enumerate_candidates_for_rule() {
     done
 }
 
+# Check if a rule can use bulk recursive processing for performance optimization
+# Returns 0 (true) if rule can use setfacl -R directly, 1 (false) otherwise
+can_use_bulk_recursive_processing() {
+    local -r recurse="$1" include_self="$2"
+    local -ar includes=("${@:3}")
+    local -i exclude_start=$((3 + ${#includes[@]}))
+    local -ar excludes=("${@:$exclude_start}")
+    
+    # Must be recursive to benefit from bulk processing
+    [[ "$recurse" != "true" ]] && return 1
+    
+    # Must have no include/exclude filters (no match filtering)
+    [[ ${#includes[@]} -gt 0 || ${#excludes[@]} -gt 0 ]] && return 1
+    
+    # Must include self to apply to root directory
+    [[ "$include_self" != "true" ]] && return 1
+    
+    return 0
+}
+
+# Apply ACLs recursively to root paths using setfacl -R for performance
+# This bypasses individual path enumeration when no filtering is needed
+apply_acls_recursively_to_roots() {
+    local -a roots=() file_specs=() dir_specs=() def_specs=()
+    local state="roots"
+    
+    # Parse variable number of arrays from arguments
+    for arg in "$@"; do
+        case "$arg" in
+            "---file_specs---")
+                state="file_specs" ;;
+            "---dir_specs---")
+                state="dir_specs" ;;
+            "---def_specs---")
+                state="def_specs" ;;
+            *)
+                case "$state" in
+                    "roots") roots+=("$arg") ;;
+                    "file_specs") file_specs+=("$arg") ;;
+                    "dir_specs") dir_specs+=("$arg") ;;
+                    "def_specs") def_specs+=("$arg") ;;
+                esac
+                ;;
+        esac
+    done
+    
+    local total_applied=0 total_failed=0
+    
+    for root in "${roots[@]}"; do
+        [[ ! -e "$root" ]] && continue
+        
+        local rc=0
+        local attempted_before=$ENTRIES_ATTEMPTED
+        
+        # Apply file and directory specs together (they'll be applied to appropriate file types)
+        local -a all_specs=()
+        all_specs+=("${file_specs[@]}")
+        all_specs+=("${dir_specs[@]}")
+        
+        if [[ ${#all_specs[@]} -gt 0 ]]; then
+            apply_specs_to_path_recursive "$root" "false" "${all_specs[@]}" || rc=1
+        fi
+        
+        # Apply default ACLs to directories recursively  
+        if [[ ${#def_specs[@]} -gt 0 ]]; then
+            apply_specs_to_path_recursive "$root" "true" "${def_specs[@]}" || rc=1
+        fi
+        
+        if [[ $rc -eq 0 ]]; then
+            total_applied=$((total_applied + 1))
+            log_success "$root (recursive)"
+        else
+            total_failed=$((total_failed + 1))
+            log_error "$root (recursive)"
+        fi
+    done
+    
+    printf "%d %d\n" "$total_applied" "$total_failed"
+}
+
+# Apply specs to a path recursively using setfacl -R
+apply_specs_to_path_recursive() {
+    local -r path="$1" is_default="$2"; shift 2
+    local -a specs=("$@")
+    [[ ${#specs[@]} -eq 0 ]] && return "$RETURN_SUCCESS"
+
+    # Deduplicate specs while preserving order
+    local -A seen=()
+    local -a unique_specs=()
+    local spec
+    for spec in "${specs[@]}"; do
+        [[ -z "$spec" ]] && continue
+        if [[ -z "${seen[$spec]:-}" ]]; then
+            seen[$spec]=1
+            unique_specs+=("$spec")
+        fi
+    done
+    [[ ${#unique_specs[@]} -eq 0 ]] && return "$RETURN_SUCCESS"
+
+    # Build shared flags once, including -R for recursive
+    local -a shared_flags=("-R")
+    [[ "$is_default" == "true" ]] && shared_flags+=("-d")
+    [[ "${CONFIG[no_recalc_mask]}" == "true" ]] && shared_flags+=("-n")
+    if [[ "${CONFIG[mask_setting]}" == "explicit" ]]; then
+        shared_flags+=("-m" "m::${CONFIG[mask_explicit]}")
+    fi
+
+    # Chunk to avoid exceeding system arg limits
+    local chunk_size="${CONFIG[chunk_size]}"
+    local total=${#unique_specs[@]}
+    local start=0
+    local rc_total=0
+
+    while (( start < total )); do
+        local end=$(( start + chunk_size ))
+        (( end > total )) && end=$total
+        local -a args=("${shared_flags[@]}")
+        local i
+        for (( i=start; i<end; i++ )); do
+            args+=("-m" "${unique_specs[i]}")
+        done
+
+        local batch_count=$(( end - start ))
+        ENTRIES_ATTEMPTED=$((ENTRIES_ATTEMPTED + batch_count))
+
+        set +e
+        execute_setfacl "$path" "recursive_batch:$batch_count" "true" "${args[@]}"
+        local rc=$?
+        set -e
+        if [[ $rc -ne 0 ]]; then
+            ENTRIES_FAILED=$((ENTRIES_FAILED + batch_count))
+            rc_total=1
+            # continue to try remaining batches
+        fi
+        start=$end
+    done
+
+    if [[ $rc_total -ne 0 ]]; then
+        return "$RETURN_FAILED"
+    fi
+    return "$RETURN_SUCCESS"
+}
+
 apply_specs_to_path() {
     local -r path="$1" is_default="$2"; shift 2
     local -a specs=("$@")
@@ -864,6 +1046,27 @@ apply_rules() {
         mapfile -t includes < <(get_rule_patterns "$i" include)
         mapfile -t excludes < <(get_rule_patterns "$i" exclude)
 
+        # Performance optimization: use bulk recursive processing when possible
+        if can_use_bulk_recursive_processing "$recurse" "$include_self" "${includes[@]}" "${excludes[@]}"; then
+            log_info "Using optimized recursive processing (no filtering required)"
+            local bulk_result
+            local -a bulk_args=()
+            bulk_args+=("${roots[@]}")
+            bulk_args+=("---file_specs---")
+            bulk_args+=("${file_specs[@]}")
+            bulk_args+=("---dir_specs---") 
+            bulk_args+=("${dir_specs[@]}")
+            bulk_args+=("---def_specs---")
+            bulk_args+=("${def_specs[@]}")
+            bulk_result=$(apply_acls_recursively_to_roots "${bulk_args[@]}")
+            local bulk_applied bulk_failed
+            read -r bulk_applied bulk_failed <<< "$bulk_result"
+            total_applied=$((total_applied + bulk_applied))
+            total_failed=$((total_failed + bulk_failed))
+            continue
+        fi
+
+        # Fall back to individual path processing when filtering is needed
         local -a candidates
         mapfile -t candidates < <(enumerate_candidates_for_rule "$recurse" "$include_self" "${roots[@]}")
         if [[ ${#candidates[@]} -eq 0 ]]; then
@@ -1115,10 +1318,26 @@ EOF
 # MAIN ORCHESTRATION - Simplified and clear
 # =============================================================================
 
+# Check for problematic test files that might cause confusion
+check_for_problematic_files() {
+    local yaml_files
+    yaml_files=$(find . -maxdepth 1 -name "test*.yml" -o -name "test*.yaml" 2>/dev/null) || true
+    
+    if [[ -n "$yaml_files" ]]; then
+        log_warning "Found YAML test files in current directory that might cause issues:"
+        while IFS= read -r file; do
+            [[ -n "$file" ]] && log_warning "  - $file"
+        done <<< "$yaml_files"
+        log_warning "These files should be removed or moved to avoid jq processing errors."
+        log_warning "YAML files are not supported - please use JSON format instead."
+    fi
+}
+
 # Initialize runtime environment
 initialize() {
     validate_dependencies
     init_colors
+    check_for_problematic_files
     validate_definitions_file
     validate_configuration_groups  # Check that all groups exist
     cache_all_rules  # Performance optimization: cache all rule data upfront
