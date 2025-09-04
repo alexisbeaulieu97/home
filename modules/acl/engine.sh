@@ -37,7 +37,6 @@ declare -A CONFIG=(
     [dry_run]="false"
     [quiet]="false"
     [enable_colors]="true"
-    [chunk_size]="128"
     [find_optimization]="true"
     [recursive_optimization]="true"
 )
@@ -899,15 +898,6 @@ parse_arguments() {
             --dry-run)
                 CONFIG[dry_run]="true"
                 shift ;;
-            --chunk-size|--chunk-size=*)
-                local value
-                value="$(get_option_value "$1" "${2:-}")"
-                if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -gt 0 ]]; then
-                    CONFIG[chunk_size]="$value"
-                else
-                    fail "$EXIT_INVALID_ARGS" "Invalid chunk size '$value' (must be positive integer)"
-                fi
-                if [[ "$1" == *=* ]]; then shift; else shift 2; fi ;;
             --no-find-optimization)
                 CONFIG[find_optimization]="false"
                 shift ;;
@@ -953,7 +943,6 @@ Options:
   -q, --quiet         Suppress informational output (errors still shown)
 
 Performance Options:
-  --chunk-size=N      setfacl batch size (default: 128)
   --no-find-optimization     Disable find command optimizations
   --no-recursive-optimization Disable direct setfacl -R optimization
 
@@ -962,9 +951,6 @@ Performance Options:
 Examples:
   # Apply all rules in config
   engine.sh -f rules.json
-
-  # Apply with larger batch size
-  engine.sh -f rules.json --chunk-size=256 /data/share
 
   # Disable recursive optimization
   engine.sh -f rules.json --no-recursive-optimization /srv/app
@@ -1026,7 +1012,7 @@ apply_all_rules() {
     log_bold "           entries ok=$entries_ok failed=${RUNTIME_STATE[entries_failed]} attempted=${RUNTIME_STATE[entries_attempted]} (${success_pct}% ok)"
     
     # Performance metrics
-    log_info "Performance: chunk_size=${CONFIG[chunk_size]} cache_hits=${RUNTIME_STATE[cache_hits]} optimized_rules=${RUNTIME_STATE[optimized_rules]}"
+    log_info "Performance: cache_hits=${RUNTIME_STATE[cache_hits]} optimized_rules=${RUNTIME_STATE[optimized_rules]}"
     
     return $total_rule_failures
 }
