@@ -32,9 +32,8 @@ declare -A CONFIG=(
     [quiet]="false"
     [enable_colors]="true"
     [chunk_size]="128"
-    [parallel_jobs]="4"
-    [enable_parallel]="true"
     [find_optimization]="true"
+    [recursive_optimization]="true"
 )
 
 # Runtime state
@@ -1266,7 +1265,7 @@ apply_rules() {
         fi
 
         # PERFORMANCE OPTIMIZATION: Use direct setfacl -R when possible
-        if can_use_direct_recursive_optimization "$i" "$recurse" "$include_self"; then
+        if [[ "${CONFIG[recursive_optimization]}" == "true" ]] && can_use_direct_recursive_optimization "$i" "$recurse" "$include_self"; then
             log_info "Using direct recursive optimization (no find enumeration needed)"
             local optimization_failed=0
             apply_rule_with_direct_recursive "$i" "$want_files" "$want_dirs" || optimization_failed=1
@@ -1363,9 +1362,9 @@ apply_rules() {
     # Performance metrics
     local cache_stats_msg="Cache hits: paths=${#path_cache[@]} groups=${#group_cache[@]} types=${#type_cache[@]}"
     if [[ $total_optimized -gt 0 ]]; then
-        log_info "Performance: chunk_size=${CONFIG[chunk_size]} parallel=${CONFIG[enable_parallel]} recursive_optimized=$total_optimized $cache_stats_msg"
+        log_info "Performance: chunk_size=${CONFIG[chunk_size]} recursive_optimized=$total_optimized $cache_stats_msg"
     else
-        log_info "Performance: chunk_size=${CONFIG[chunk_size]} parallel=${CONFIG[enable_parallel]} $cache_stats_msg"
+        log_info "Performance: chunk_size=${CONFIG[chunk_size]} $cache_stats_msg"
     fi
 
     if [[ $total_failed -eq 0 ]]; then return 0; else return 1; fi
@@ -1437,22 +1436,6 @@ parse_arguments() {
             --dry-run)
                 CONFIG[dry_run]="true"
                 shift ;;
-            --parallel|--parallel=*)
-                if [[ "$1" == *=* ]]; then
-                    local value="${1#*=}"
-                    if [[ "$value" =~ ^[0-9]+$ ]] && [[ "$value" -gt 0 ]]; then
-                        CONFIG[parallel_jobs]="$value"
-                    else
-                        fail "$EXIT_INVALID_ARGS" "Invalid parallel jobs value '$value' (must be positive integer)"
-                    fi
-                    shift
-                else
-                    CONFIG[enable_parallel]="true"
-                    shift
-                fi ;;
-            --no-parallel)
-                CONFIG[enable_parallel]="false"
-                shift ;;
             --chunk-size|--chunk-size=*)
                 local value
                 value="$(get_option_value "$1" "${2:-}")"
@@ -1468,6 +1451,9 @@ parse_arguments() {
                 fi ;;
             --no-find-optimization)
                 CONFIG[find_optimization]="false"
+                shift ;;
+            --no-recursive-optimization)
+                CONFIG[recursive_optimization]="false"
                 shift ;;
             -q|--quiet)
                 CONFIG[quiet]="true"
@@ -1509,10 +1495,9 @@ Options:
   -q, --quiet         Suppress informational output (errors still shown)
 
 Performance Options:
-  --parallel[=N]      Enable parallel processing with N jobs (default: 4)
-  --no-parallel       Disable parallel processing (default for safety)
   --chunk-size=N      setfacl batch size (default: 128, higher=faster but more memory)
-  --no-find-optimization  Disable find optimizations (use for compatibility)
+  --no-find-optimization     Disable find command optimizations (limits enumeration)
+  --no-recursive-optimization Disable direct setfacl -R optimization for recursive rules
 
   -h, --help          Show this help message
 
@@ -1520,11 +1505,11 @@ Examples:
   # Apply all rules in config
   ${SCRIPT_NAME} -f rules.json
 
-  # Apply with parallel processing for large directory trees
-  ${SCRIPT_NAME} -f rules.json --parallel=8 /srv/app
-
-  # Apply only under specific paths with optimized chunk size
+  # Apply with larger batch size for better performance
   ${SCRIPT_NAME} -f rules.json --chunk-size=256 /data/share
+
+  # Disable recursive optimization (use traditional per-file processing)
+  ${SCRIPT_NAME} -f rules.json --no-recursive-optimization /srv/app
 
   # Simulate applying with a specific mask
   ${SCRIPT_NAME} -f rules.json --mask r-x --dry-run /opt/scripts
@@ -1550,7 +1535,6 @@ Config (excerpt):
 Performance Notes:
   - **Direct recursive optimization**: Rules without match patterns use setfacl -R directly
   - **Increased chunk-size** reduces setfacl calls but uses more memory  
-  - **Parallel processing** significantly speeds up large directory trees
   - **Dynamic chunk sizing** automatically adjusts for ACL complexity
   - **Smart type checking** skips unnecessary file/directory type checks
   - **Path caching** reduces filesystem stat() calls
