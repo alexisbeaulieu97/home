@@ -5,3 +5,8 @@ venv/
 .venv/
 __pycache__/
 
+# test artifacts
+test.yml
+test.json
+*.tmp
+
