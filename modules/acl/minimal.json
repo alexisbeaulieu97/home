@@ -1,8 +1,0 @@
-{
-  "rules": [
-    {
-      "roots": "/tmp/test",
-      "acl": ["g:testgroup:rwx"]
-    }
-  ]
-}
