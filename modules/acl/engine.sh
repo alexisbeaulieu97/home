@@ -266,7 +266,7 @@ _collect_for_json() {
     
     if [[ "${CONFIG[output_format]}" == "json" || "${CONFIG[output_format]}" == "jsonl" ]]; then
         # Escape quotes and backslashes in the message for JSON
-        message=$(printf '%s' "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
+        message=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g')
         
         case "$type" in
             error)
