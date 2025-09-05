@@ -71,19 +71,19 @@ EOF
     
     # Get text mode stderr (should have INFO/SUCCESS messages)
     local text_stderr
-    text_stderr=$(./engine.sh -f "$config" --dry-run --output-format text 2>&1 >/dev/null)
+    text_stdout=$(./engine.sh -f "$config" --dry-run --output-format text 2>/dev/null)
     
-    # Get JSON mode stderr (should be minimal)
-    local json_stderr  
-    json_stderr=$(./engine.sh -f "$config" --dry-run --output-format json 2>&1 >/dev/null)
+    # Get JSON mode stdout (should be minimal)
+    local json_stdout  
+    json_stdout=$(./engine.sh -f "$config" --dry-run --output-format json 2>/dev/null)
     
     # Text mode should have more output than JSON mode
     local text_lines json_lines
-    text_lines=$(echo "$text_stderr" | wc -l)
-    json_lines=$(echo "$json_stderr" | wc -l)
+    text_lines=$(echo "$text_stdout" | wc -l)
+    json_lines=$(echo "$json_stdout" | wc -l)
     
     if [[ $text_lines -le $json_lines ]]; then
-        echo "FAIL: Text mode should have more stderr output than JSON mode"
+        echo "FAIL: Text mode should have more stdout output than JSON mode"
         echo "Text lines: $text_lines, JSON lines: $json_lines"
         return 1
     fi
