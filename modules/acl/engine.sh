@@ -867,7 +867,7 @@ configure_mask() {
             if is_valid_mask "$value"; then
                 CONFIG[mask_setting]="explicit"
                 CONFIG[mask_explicit]="$value"
-                CONFIG[no_recalc_mask]="false"
+                CONFIG[no_recalc_mask]="true"
             else
                 fail "$EXIT_INVALID_ARGS" "Invalid mask '$value' (use auto, skip, or rwx pattern)"
             fi
