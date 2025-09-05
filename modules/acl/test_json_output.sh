@@ -69,22 +69,27 @@ test_text_vs_json() {
 }
 EOF
     
-    # Get text mode stderr (should have INFO/SUCCESS messages)
-    local text_stderr
-    text_stdout=$(./engine.sh -f "$config" --dry-run --output-format text 2>/dev/null)
+    # Get text mode output (should have INFO/SUCCESS messages on stderr)
+    local text_output json_output
+    text_output=$(./engine.sh -f "$config" --dry-run --output-format text 2>&1)
     
-    # Get JSON mode stdout (should be minimal)
-    local json_stdout  
-    json_stdout=$(./engine.sh -f "$config" --dry-run --output-format json 2>/dev/null)
+    # Get JSON mode output (should only have JSON on stdout, no INFO messages)
+    json_output=$(./engine.sh -f "$config" --dry-run --output-format json 2>&1)
     
-    # Text mode should have more output than JSON mode
-    local text_lines json_lines
-    text_lines=$(echo "$text_stdout" | wc -l)
-    json_lines=$(echo "$json_stdout" | wc -l)
+    # Check that JSON output contains valid JSON structure
+    if ! echo "$json_output" | jq -e '.run' >/dev/null 2>&1; then
+        echo "FAIL: JSON output doesn't contain valid JSON structure"
+        return 1
+    fi
     
-    if [[ $text_lines -le $json_lines ]]; then
-        echo "FAIL: Text mode should have more stdout output than JSON mode"
-        echo "Text lines: $text_lines, JSON lines: $json_lines"
+    # Check that text output contains INFO messages but JSON output doesn't
+    if ! echo "$text_output" | grep -q "INFO:"; then
+        echo "FAIL: Text output should contain INFO messages"
+        return 1
+    fi
+    
+    if echo "$json_output" | grep -q "INFO:"; then
+        echo "FAIL: JSON output should not contain INFO messages"
         return 1
     fi
     
