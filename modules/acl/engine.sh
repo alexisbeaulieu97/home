@@ -1129,13 +1129,23 @@ generate_json_config() {
 EOF
 }
 
+# Format a Unix timestamp as ISO 8601, with fallbacks for portability
+format_timestamp() {
+    local ts="$1"
+    if [[ -z "$ts" ]]; then
+        echo ""
+        return
+    fi
+    date -d "@$ts" -Iseconds 2>/dev/null || date -r "$ts" -Iseconds 2>/dev/null || echo "$ts"
+}
+
 generate_json_run_metadata() {
     local exit_code="$1"
     local duration=""
     local timestamp_iso=""
     
     if [[ -n "${RUNTIME_STATE[start_time]}" ]]; then
-        timestamp_iso=$(date -d "@${RUNTIME_STATE[start_time]}" -Iseconds 2>/dev/null || date -r "${RUNTIME_STATE[start_time]}" -Iseconds 2>/dev/null || echo "${RUNTIME_STATE[start_time]}")
+        timestamp_iso=$(format_timestamp "${RUNTIME_STATE[start_time]}")
     fi
     
     if [[ -n "${RUNTIME_STATE[start_time]}" && -n "${RUNTIME_STATE[end_time]}" ]]; then
