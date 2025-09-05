@@ -39,6 +39,7 @@ declare -A CONFIG=(
     [enable_colors]="true"
     [find_optimization]="true"
     [recursive_optimization]="true"
+    [output_format]="text"
 )
 
 # Runtime state service - encapsulates all runtime state
@@ -52,9 +53,86 @@ declare -A RUNTIME_STATE=(
     [total_skipped]="0"
     [bulk_operations]="0"
     [bulk_verbose_threshold]="10"
+    [start_time]=""
+    [end_time]=""
 )
 
 declare -a target_paths=()
+
+# JSON output data collection
+declare -A JSON_OUTPUT=(
+    [warnings]=""
+    [errors]=""
+    [rule_summaries]=""
+)
+
+# Function to add rule summary to JSON output
+add_rule_summary() {
+    local rule_idx="$1"
+    local status="$2"  # "success", "failed", "skipped"
+    local message="$3"
+    
+    # Get rule information
+    local roots_data file_specs_data dir_specs_data def_specs_data
+    roots_data=$(get_rule_data "$rule_idx" "roots")
+    file_specs_data=$(get_rule_data "$rule_idx" "file_specs")
+    dir_specs_data=$(get_rule_data "$rule_idx" "dir_specs")
+    def_specs_data=$(get_rule_data "$rule_idx" "def_specs")
+    
+    # Build ACL specs array - collect unique specs to avoid duplication
+    local -A unique_specs=()
+    local acl_specs=""
+    local separator=""
+    
+    # Collect from all spec types
+    if [[ -n "$file_specs_data" ]]; then
+        while IFS= read -r spec; do
+            [[ -n "$spec" ]] && unique_specs["$spec"]=1
+        done <<< "$file_specs_data"
+    fi
+    if [[ -n "$dir_specs_data" ]]; then
+        while IFS= read -r spec; do
+            [[ -n "$spec" ]] && unique_specs["$spec"]=1
+        done <<< "$dir_specs_data"
+    fi
+    if [[ -n "$def_specs_data" ]]; then
+        while IFS= read -r spec; do
+            [[ -n "$spec" ]] && unique_specs["$spec"]=1
+        done <<< "$def_specs_data"
+    fi
+    
+    # Build JSON array from unique specs
+    for spec in "${!unique_specs[@]}"; do
+        acl_specs+="${separator}\"$spec\"" && separator=","
+    done
+    
+    # Build roots array
+    local roots_array=""
+    local root_separator=""
+    if [[ -n "$roots_data" ]]; then
+        while IFS= read -r root; do
+            [[ -n "$root" ]] && roots_array+="${root_separator}\"$root\"" && root_separator=","
+        done <<< "$roots_data"
+    fi
+    
+    local rule_json=$(cat << EOF
+    {
+      "index": $rule_idx,
+      "roots": [$roots_array],
+      "acl_specs": [$acl_specs],
+      "status": "$status",
+      "message": "$message"
+    }
+EOF
+)
+    
+    # Add to rule summaries
+    if [[ -n "${JSON_OUTPUT[rule_summaries]}" ]]; then
+        JSON_OUTPUT[rule_summaries]="${JSON_OUTPUT[rule_summaries]},$rule_json"
+    else
+        JSON_OUTPUT[rule_summaries]="$rule_json"
+    fi
+}
 
 # =============================================================================
 # CACHE SERVICE - Centralized caching with clear interface
@@ -249,14 +327,75 @@ _log_unless_quiet() {
     [[ "${CONFIG[quiet]}" == "true" ]] || _log "$@"
 }
 
-# Public logging interface
-log_info()       { _log_unless_quiet blue 2 "INFO: " "$*"; }
-log_success()    { _log_unless_quiet green 2 "SUCCESS: " "$*"; }
-log_error()      { _log red 2 "ERROR: " "$*"; }
-log_warning()    { _log yellow 2 "WARNING: " "$*"; }
-log_processing() { _log_unless_quiet cyan 2 "PROCESSING: " "$*"; }
-log_bold()       { _log_unless_quiet bold 2 "" "$*"; }
-log_progress()   { _log_unless_quiet blue 2 "PROGRESS: " "$*"; }
+# JSON output data collection
+_collect_for_json() {
+    local -r type="$1"; shift
+    local message="$*"
+    
+    if [[ "${CONFIG[output_format]}" == "json" || "${CONFIG[output_format]}" == "jsonl" ]]; then
+        # Escape quotes and backslashes in the message for JSON
+        message=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        
+        case "$type" in
+            error)
+                if [[ -n "${JSON_OUTPUT[errors]}" ]]; then
+                    JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]},"
+                fi
+                JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]}\"$message\""
+                ;;
+            warning)
+                if [[ -n "${JSON_OUTPUT[warnings]}" ]]; then
+                    JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]},"
+                fi
+                JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]}\"$message\""
+                ;;
+        esac
+    fi
+}
+
+# Public logging interface - modified to suppress output in JSON modes
+log_info() {
+    if [[ "${CONFIG[output_format]}" == "text" ]]; then
+        _log_unless_quiet blue 2 "INFO: " "$*"
+    fi
+}
+
+log_success() {
+    if [[ "${CONFIG[output_format]}" == "text" ]]; then
+        _log_unless_quiet green 2 "SUCCESS: " "$*"
+    fi
+}
+
+log_error() {
+    _collect_for_json "error" "$*"
+    # Always show errors on stderr, even in JSON mode, for debugging
+    _log red 2 "ERROR: " "$*"
+}
+
+log_warning() {
+    _collect_for_json "warning" "$*"
+    if [[ "${CONFIG[output_format]}" == "text" ]]; then
+        _log yellow 2 "WARNING: " "$*"
+    fi
+}
+
+log_processing() {
+    if [[ "${CONFIG[output_format]}" == "text" ]]; then
+        _log_unless_quiet cyan 2 "PROCESSING: " "$*"
+    fi
+}
+
+log_bold() {
+    if [[ "${CONFIG[output_format]}" == "text" ]]; then
+        _log_unless_quiet bold 2 "" "$*"
+    fi
+}
+
+log_progress() {
+    if [[ "${CONFIG[output_format]}" == "text" ]]; then
+        _log_unless_quiet blue 2 "PROGRESS: " "$*"
+    fi
+}
 
 # =============================================================================
 # ERROR HANDLING SERVICE
@@ -671,6 +810,10 @@ execute_rule() {
     
     [[ ${#valid_roots[@]} -gt 0 ]] || {
         log_info "No valid roots for rule $((rule_idx + 1))"
+        # Collect rule summary for JSON output
+        if [[ "${CONFIG[output_format]}" == "json" ]]; then
+            add_rule_summary "$rule_idx" "skipped" "No valid roots found"
+        fi
         return 0
     }
     
@@ -820,6 +963,15 @@ execute_rule() {
         fi
     done
     
+    # Collect rule summary for JSON output
+    if [[ "${CONFIG[output_format]}" == "json" ]]; then
+        if [[ $rule_failed -eq 0 ]]; then
+            add_rule_summary "$rule_idx" "success" "Rule applied successfully to ${#valid_roots[@]} root(s)"
+        else
+            add_rule_summary "$rule_idx" "failed" "Rule failed for some paths"
+        fi
+    fi
+    
     return $rule_failed
 }
 
@@ -875,6 +1027,18 @@ configure_mask() {
     esac
 }
 
+set_output_format() {
+    local -r format="$1"
+    case "$format" in
+        text|json|jsonl)
+            CONFIG[output_format]="$format"
+            ;;
+        *)
+            fail "$EXIT_INVALID_ARGS" "Invalid output format '$format' (use text, json, or jsonl)"
+            ;;
+    esac
+}
+
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -891,6 +1055,11 @@ parse_arguments() {
                 local value
                 value="$(get_option_value "$1" "${2:-}")"
                 configure_mask "$value"
+                if [[ "$1" == *=* ]]; then shift; else shift 2; fi ;;
+            -o|--output-format|--output-format=*)
+                local value
+                value="$(get_option_value "$1" "${2:-}")"
+                set_output_format "$value"
                 if [[ "$1" == *=* ]]; then shift; else shift 2; fi ;;
             --no-color)
                 CONFIG[color_mode]="never"
@@ -939,6 +1108,7 @@ Options:
   --color MODE        Output colors: auto|always|never (default: auto)
   --no-color          Disable colors (equivalent to --color never)
   --mask VALUE        Mask handling: auto|skip|<rwx> (default: auto)
+  -o, --output-format FORMAT  Output format: text|json|jsonl (default: text)
   --dry-run           Simulate without making changes
   -q, --quiet         Suppress informational output (errors still shown)
 
@@ -951,6 +1121,9 @@ Performance Options:
 Examples:
   # Apply all rules in config
   engine.sh -f rules.json
+
+  # Get JSON output summary
+  engine.sh -f rules.json --output-format json
 
   # Disable recursive optimization
   engine.sh -f rules.json --no-recursive-optimization /srv/app
@@ -1017,18 +1190,128 @@ apply_all_rules() {
     return $total_rule_failures
 }
 
+# =============================================================================
+# JSON OUTPUT GENERATION
+# =============================================================================
+
+generate_json_config() {
+    cat << EOF
+  "config": {
+    "definitions_file": "${CONFIG[definitions_file]}",
+    "color_mode": "${CONFIG[color_mode]}",
+    "mask_setting": "${CONFIG[mask_setting]}",
+    "mask_explicit": "${CONFIG[mask_explicit]}",
+    "dry_run": ${CONFIG[dry_run]},
+    "quiet": ${CONFIG[quiet]},
+    "find_optimization": ${CONFIG[find_optimization]},
+    "recursive_optimization": ${CONFIG[recursive_optimization]},
+    "output_format": "${CONFIG[output_format]}"
+  }
+EOF
+}
+
+# Format a Unix timestamp as ISO 8601, with fallbacks for portability
+format_timestamp() {
+    local ts="$1"
+    if [[ -z "$ts" ]]; then
+        echo ""
+        return
+    fi
+    date -d "@$ts" -Iseconds 2>/dev/null || date -r "$ts" -Iseconds 2>/dev/null || echo "$ts"
+}
+
+generate_json_run_metadata() {
+    local exit_code="$1"
+    local duration_ms=""
+    local timestamp_iso=""
+    
+    if [[ -n "${RUNTIME_STATE[start_time]}" ]]; then
+        timestamp_iso=$(format_timestamp $((${RUNTIME_STATE[start_time]} / 1000)))
+    fi
+    
+    if [[ -n "${RUNTIME_STATE[start_time]}" && -n "${RUNTIME_STATE[end_time]}" ]]; then
+        duration_ms=$(( ${RUNTIME_STATE[end_time]} - ${RUNTIME_STATE[start_time]} ))
+    fi
+    
+    cat << EOF
+  "run": {
+    "timestamp": "$timestamp_iso",
+    "duration_ms": ${duration_ms:-0},
+    "exit_code": $exit_code,
+    "mode": "$(if [[ "${CONFIG[dry_run]}" == "true" ]]; then echo "dry_run"; else echo "apply"; fi)"
+  }
+EOF
+}
+
+generate_json_metrics() {
+    local entries_ok=$((${RUNTIME_STATE[entries_attempted]} - ${RUNTIME_STATE[entries_failed]}))
+    local success_pct=100
+    if [[ ${RUNTIME_STATE[entries_attempted]} -gt 0 ]]; then
+        success_pct=$(( entries_ok * 100 / ${RUNTIME_STATE[entries_attempted]} ))
+    fi
+    
+    cat << EOF
+  "metrics": {
+    "paths": {
+      "applied": ${RUNTIME_STATE[total_applied]},
+      "failed": ${RUNTIME_STATE[total_failed]},
+      "skipped": ${RUNTIME_STATE[total_skipped]}
+    },
+    "entries": {
+      "ok": $entries_ok,
+      "failed": ${RUNTIME_STATE[entries_failed]},
+      "attempted": ${RUNTIME_STATE[entries_attempted]},
+      "success_percentage": $success_pct
+    },
+    "performance": {
+      "cache_hits": ${RUNTIME_STATE[cache_hits]},
+      "optimized_rules": ${RUNTIME_STATE[optimized_rules]}
+    }
+  }
+EOF
+}
+
+generate_json_warnings_errors() {
+    cat << EOF
+  "warnings": [${JSON_OUTPUT[warnings]:-}],
+  "errors": [${JSON_OUTPUT[errors]:-}]
+EOF
+}
+
+generate_json_output() {
+    local exit_code="$1"
+    cat << EOF
+{
+$(generate_json_run_metadata "$exit_code"),
+$(generate_json_config),
+$(generate_json_metrics),
+  "rules": [${JSON_OUTPUT[rule_summaries]}],
+$(generate_json_warnings_errors)
+}
+EOF
+}
+
 main() {
+    RUNTIME_STATE[start_time]=$(date +%s%3N)
     parse_arguments "$@"
     initialize
     determine_target_paths
     
     log_bold "ACL definitions from: ${CONFIG[definitions_file]}"
     
-    if apply_all_rules; then
-        exit "$EXIT_SUCCESS"
-    else
-        exit "$EXIT_ERROR"
+    local exit_code="$EXIT_SUCCESS"
+    if ! apply_all_rules; then
+        exit_code="$EXIT_ERROR"
     fi
+    
+    RUNTIME_STATE[end_time]=$(date +%s%3N)
+    
+    # Generate output based on format
+    if [[ "${CONFIG[output_format]}" == "json" ]]; then
+        generate_json_output "$exit_code"
+    fi
+    
+    exit "$exit_code"
 }
 
 # Entry point
