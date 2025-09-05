@@ -254,7 +254,7 @@ log_info()       { _log_unless_quiet blue 2 "INFO: " "$*"; }
 log_success()    { _log_unless_quiet green 2 "SUCCESS: " "$*"; }
 log_error()      { _log red 2 "ERROR: " "$*"; }
 log_warning()    { _log yellow 2 "WARNING: " "$*"; }
-log_processing() { _log_unless_quiet cyan 2 "PROCESSING: " "$*"; exec 2>&2; }  # Force flush
+log_processing() { _log_unless_quiet cyan 2 "PROCESSING: " "$*"; }
 log_bold()       { _log_unless_quiet bold 2 "" "$*"; }
 log_progress()   { _log_unless_quiet blue 2 "PROGRESS: " "$*"; }
 
