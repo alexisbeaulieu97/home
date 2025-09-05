@@ -66,6 +66,74 @@ declare -A JSON_OUTPUT=(
     [rule_summaries]=""
 )
 
+# Function to add rule summary to JSON output
+add_rule_summary() {
+    local rule_idx="$1"
+    local status="$2"  # "success", "failed", "skipped"
+    local message="$3"
+    
+    # Get rule information
+    local roots_data file_specs_data dir_specs_data def_specs_data
+    roots_data=$(get_rule_data "$rule_idx" "roots")
+    file_specs_data=$(get_rule_data "$rule_idx" "file_specs")
+    dir_specs_data=$(get_rule_data "$rule_idx" "dir_specs")
+    def_specs_data=$(get_rule_data "$rule_idx" "def_specs")
+    
+    # Build ACL specs array - collect unique specs to avoid duplication
+    local -A unique_specs=()
+    local acl_specs=""
+    local separator=""
+    
+    # Collect from all spec types
+    if [[ -n "$file_specs_data" ]]; then
+        while IFS= read -r spec; do
+            [[ -n "$spec" ]] && unique_specs["$spec"]=1
+        done <<< "$file_specs_data"
+    fi
+    if [[ -n "$dir_specs_data" ]]; then
+        while IFS= read -r spec; do
+            [[ -n "$spec" ]] && unique_specs["$spec"]=1
+        done <<< "$dir_specs_data"
+    fi
+    if [[ -n "$def_specs_data" ]]; then
+        while IFS= read -r spec; do
+            [[ -n "$spec" ]] && unique_specs["$spec"]=1
+        done <<< "$def_specs_data"
+    fi
+    
+    # Build JSON array from unique specs
+    for spec in "${!unique_specs[@]}"; do
+        acl_specs+="${separator}\"$spec\"" && separator=","
+    done
+    
+    # Build roots array
+    local roots_array=""
+    local root_separator=""
+    if [[ -n "$roots_data" ]]; then
+        while IFS= read -r root; do
+            [[ -n "$root" ]] && roots_array+="${root_separator}\"$root\"" && root_separator=","
+        done <<< "$roots_data"
+    fi
+    
+    local rule_json=$(cat << EOF
+    {
+      "index": $rule_idx,
+      "roots": [$roots_array],
+      "acl_specs": [$acl_specs],
+      "status": "$status",
+      "message": "$message"
+    }
+EOF
+)
+    
+    # Add to rule summaries
+    if [[ -n "${JSON_OUTPUT[rule_summaries]}" ]]; then
+        JSON_OUTPUT[rule_summaries]="${JSON_OUTPUT[rule_summaries]},$rule_json"
+    else
+        JSON_OUTPUT[rule_summaries]="$rule_json"
+    fi
+}
+
 # =============================================================================
 # CACHE SERVICE - Centralized caching with clear interface
 # =============================================================================
@@ -742,6 +810,10 @@ execute_rule() {
     
     [[ ${#valid_roots[@]} -gt 0 ]] || {
         log_info "No valid roots for rule $((rule_idx + 1))"
+        # Collect rule summary for JSON output
+        if [[ "${CONFIG[output_format]}" == "json" ]]; then
+            add_rule_summary "$rule_idx" "skipped" "No valid roots found"
+        fi
         return 0
     }
     
@@ -890,6 +962,15 @@ execute_rule() {
             rule_failed=1
         fi
     done
+    
+    # Collect rule summary for JSON output
+    if [[ "${CONFIG[output_format]}" == "json" ]]; then
+        if [[ $rule_failed -eq 0 ]]; then
+            add_rule_summary "$rule_idx" "success" "Rule applied successfully to ${#valid_roots[@]} root(s)"
+        else
+            add_rule_summary "$rule_idx" "failed" "Rule failed for some paths"
+        fi
+    fi
     
     return $rule_failed
 }
@@ -1141,21 +1222,21 @@ format_timestamp() {
 
 generate_json_run_metadata() {
     local exit_code="$1"
-    local duration=""
+    local duration_ms=""
     local timestamp_iso=""
     
     if [[ -n "${RUNTIME_STATE[start_time]}" ]]; then
-        timestamp_iso=$(format_timestamp "${RUNTIME_STATE[start_time]}")
+        timestamp_iso=$(format_timestamp $((${RUNTIME_STATE[start_time]} / 1000)))
     fi
     
     if [[ -n "${RUNTIME_STATE[start_time]}" && -n "${RUNTIME_STATE[end_time]}" ]]; then
-        duration=$(( ${RUNTIME_STATE[end_time]} - ${RUNTIME_STATE[start_time]} ))
+        duration_ms=$(( ${RUNTIME_STATE[end_time]} - ${RUNTIME_STATE[start_time]} ))
     fi
     
     cat << EOF
   "run": {
     "timestamp": "$timestamp_iso",
-    "duration_seconds": $duration,
+    "duration_ms": ${duration_ms:-0},
     "exit_code": $exit_code,
     "mode": "$(if [[ "${CONFIG[dry_run]}" == "true" ]]; then echo "dry_run"; else echo "apply"; fi)"
   }
@@ -1204,14 +1285,14 @@ generate_json_output() {
 $(generate_json_run_metadata "$exit_code"),
 $(generate_json_config),
 $(generate_json_metrics),
-  "rules": [],
+  "rules": [${JSON_OUTPUT[rule_summaries]}],
 $(generate_json_warnings_errors)
 }
 EOF
 }
 
 main() {
-    RUNTIME_STATE[start_time]=$(date +%s)
+    RUNTIME_STATE[start_time]=$(date +%s%3N)
     parse_arguments "$@"
     initialize
     determine_target_paths
@@ -1223,7 +1304,7 @@ main() {
         exit_code="$EXIT_ERROR"
     fi
     
-    RUNTIME_STATE[end_time]=$(date +%s)
+    RUNTIME_STATE[end_time]=$(date +%s%3N)
     
     # Generate output based on format
     if [[ "${CONFIG[output_format]}" == "json" ]]; then
