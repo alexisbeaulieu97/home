@@ -1,3 +1,4 @@
+echo "DEBUG: Starting script" >&2
 #!/bin/bash
 #
 # engine.sh - Apply POSIX ACLs to filesystem paths based on JSON definitions
@@ -265,21 +266,18 @@ _collect_for_json() {
     local message="$*"
     
     if [[ "${CONFIG[output_format]}" == "json" || "${CONFIG[output_format]}" == "jsonl" ]]; then
-        # Escape quotes and backslashes in the message for JSON
-        message=$(printf '%s' "$message" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g')
-        
         case "$type" in
             error)
                 if [[ -n "${JSON_OUTPUT[errors]}" ]]; then
                     JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]},"
                 fi
-                JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]}\"$message\""
+                JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]}$(printf '"%s"' "$message" | sed 's/"/\\"/g')"
                 ;;
             warning)
                 if [[ -n "${JSON_OUTPUT[warnings]}" ]]; then
                     JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]},"
                 fi
-                JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]}\"$message\""
+                JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]}$(printf '"%s"' "$message" | sed 's/"/\\"/g')"
                 ;;
         esac
     fi
@@ -287,46 +285,33 @@ _collect_for_json() {
 
 # Public logging interface - modified to suppress output in JSON modes
 log_info() {
-    if [[ "${CONFIG[output_format]}" == "text" ]]; then
-        _log_unless_quiet blue 2 "INFO: " "$*"
-    fi
+    [[ "${CONFIG[output_format]}" == "text" ]] && _log_unless_quiet blue 2 "INFO: " "$*"
 }
 
 log_success() {
-    if [[ "${CONFIG[output_format]}" == "text" ]]; then
-        _log_unless_quiet green 2 "SUCCESS: " "$*"
-    fi
+    [[ "${CONFIG[output_format]}" == "text" ]] && _log_unless_quiet green 2 "SUCCESS: " "$*"
 }
 
 log_error() {
     _collect_for_json "error" "$*"
-    # Always show errors on stderr, even in JSON mode, for debugging
-    _log red 2 "ERROR: " "$*"
+    [[ "${CONFIG[output_format]}" == "text" ]] && _log red 2 "ERROR: " "$*"
 }
 
 log_warning() {
     _collect_for_json "warning" "$*"
-    if [[ "${CONFIG[output_format]}" == "text" ]]; then
-        _log yellow 2 "WARNING: " "$*"
-    fi
+    [[ "${CONFIG[output_format]}" == "text" ]] && _log yellow 2 "WARNING: " "$*"
 }
 
 log_processing() {
-    if [[ "${CONFIG[output_format]}" == "text" ]]; then
-        _log_unless_quiet cyan 2 "PROCESSING: " "$*"
-    fi
+    [[ "${CONFIG[output_format]}" == "text" ]] && _log_unless_quiet cyan 2 "PROCESSING: " "$*"
 }
 
 log_bold() {
-    if [[ "${CONFIG[output_format]}" == "text" ]]; then
-        _log_unless_quiet bold 2 "" "$*"
-    fi
+    [[ "${CONFIG[output_format]}" == "text" ]] && _log_unless_quiet bold 2 "" "$*"
 }
 
 log_progress() {
-    if [[ "${CONFIG[output_format]}" == "text" ]]; then
-        _log_unless_quiet blue 2 "PROGRESS: " "$*"
-    fi
+    [[ "${CONFIG[output_format]}" == "text" ]] && _log_unless_quiet blue 2 "PROGRESS: " "$*"
 }
 
 # =============================================================================
@@ -1132,19 +1117,13 @@ EOF
 generate_json_run_metadata() {
     local exit_code="$1"
     local duration=""
-    local timestamp_iso=""
-    
-    if [[ -n "${RUNTIME_STATE[start_time]}" ]]; then
-        timestamp_iso=$(date -d "@${RUNTIME_STATE[start_time]}" -Iseconds 2>/dev/null || date -r "${RUNTIME_STATE[start_time]}" -Iseconds 2>/dev/null || echo "${RUNTIME_STATE[start_time]}")
-    fi
-    
     if [[ -n "${RUNTIME_STATE[start_time]}" && -n "${RUNTIME_STATE[end_time]}" ]]; then
         duration=$(( ${RUNTIME_STATE[end_time]} - ${RUNTIME_STATE[start_time]} ))
     fi
     
     cat << EOF
   "run": {
-    "timestamp": "$timestamp_iso",
+    "timestamp": "${RUNTIME_STATE[start_time]}",
     "duration_seconds": $duration,
     "exit_code": $exit_code,
     "mode": "$(if [[ "${CONFIG[dry_run]}" == "true" ]]; then echo "dry_run"; else echo "apply"; fi)"
