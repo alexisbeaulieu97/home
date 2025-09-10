@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "apply_order": "shallow_to_deep",
+  "rules": [
+    {
+      "id": "test-rule-1",
+      "description": "Test rule with all features",
+      "roots": ["/tmp/test1", "/tmp/test2"],
+      "recurse": true,
+      "include_self": true,
+      "match": {
+        "types": ["file", "directory"],
+        "pattern_syntax": "glob",
+        "include": ["**/*"],
+        "exclude": ["*.tmp", ".git/**"],
+        "match_base": true,
+        "case_sensitive": true
+      },
+      "acl": {
+        "files": [
+          {"kind": "group", "name": "developers", "mode": "rw-"},
+          {"kind": "other", "mode": "r--"}
+        ],
+        "directories": [
+          {"kind": "group", "name": "developers", "mode": "rwx"},
+          {"kind": "other", "mode": "r-x"}
+        ]
+      },
+      "default_acl": [
+        {"kind": "group", "name": "developers", "mode": "rwx"},
+        {"kind": "mask", "mode": "rwx"}
+      ]
+    },
+    {
+      "id": "test-rule-2",
+      "description": "Test rule with string ACL format",
+      "roots": "/tmp/test3",
+      "recurse": false,
+      "acl": [
+        "g:testgroup:rwx",
+        "u:testuser:rw-",
+        "o::r--"
+      ]
+    }
+  ]
+}
