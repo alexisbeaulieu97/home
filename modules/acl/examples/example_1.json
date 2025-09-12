@@ -9,8 +9,8 @@
             "roots": [
                 "/srv/app"
             ],
-            "recurse": true,
-            "include_self": true,
+            "include_root": true,
+            "depth": "infinite",
             "match": {
                 "types": [
                     "file",
@@ -45,8 +45,8 @@
             "roots": [
                 "/srv/app/scripts"
             ],
-            "recurse": true,
-            "include_self": false,
+            "include_root": false,
+            "depth": "infinite",
             "match": {
                 "types": [
                     "file"
@@ -76,8 +76,8 @@
             "roots": [
                 "/srv/app/logs"
             ],
-            "recurse": true,
-            "include_self": false,
+            "include_root": false,
+            "depth": "infinite",
             "match": {
                 "types": [
                     "file"
@@ -101,7 +101,8 @@
             "roots": [
                 "/data/share"
             ],
-            "recurse": true,
+            "include_root": true,
+            "depth": "infinite",
             "match": {
                 "types": [
                     "directory"

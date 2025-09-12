@@ -5,30 +5,62 @@
     {
       "id": "test-rule-1",
       "description": "Test rule with all features",
-      "roots": ["/tmp/test1", "/tmp/test2"],
-      "recurse": true,
-      "include_self": true,
+      "roots": [
+        "/tmp/test1",
+        "/tmp/test2"
+      ],
+      "include_root": true,
+      "depth": "infinite",
       "match": {
-        "types": ["file", "directory"],
+        "types": [
+          "file",
+          "directory"
+        ],
         "pattern_syntax": "glob",
-        "include": ["**/*"],
-        "exclude": ["*.tmp", ".git/**"],
+        "include": [
+          "**/*"
+        ],
+        "exclude": [
+          "*.tmp",
+          ".git/**"
+        ],
         "match_base": true,
         "case_sensitive": true
       },
       "acl": {
         "files": [
-          {"kind": "group", "name": "developers", "mode": "rw-"},
-          {"kind": "other", "mode": "r--"}
+          {
+            "kind": "group",
+            "name": "developers",
+            "mode": "rw-"
+          },
+          {
+            "kind": "other",
+            "mode": "r--"
+          }
         ],
         "directories": [
-          {"kind": "group", "name": "developers", "mode": "rwx"},
-          {"kind": "other", "mode": "r-x"}
+          {
+            "kind": "group",
+            "name": "developers",
+            "mode": "rwx"
+          },
+          {
+            "kind": "other",
+            "mode": "r-x"
+          }
         ]
       },
       "default_acl": [
-        {"kind": "group", "name": "developers", "mode": "rwx"},
-        {"kind": "mask", "mode": "rwx"}
+        {
+          "kind": "group",
+          "name": "developers",
+          "mode": "rwx"
+        },
+        {
+          "kind": "mask",
+          "mode": "rwx"
+        }
       ]
     },
     {
