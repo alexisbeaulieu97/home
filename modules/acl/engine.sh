@@ -197,7 +197,7 @@ cache_all_rules() {
         "rules_count|\(.rules|length)",
         (.rules | to_entries[] as $e |
             (
-                ( $e.value.include_root // true ) as $inc_root
+                ( if ($e.value | has("include_root")) then $e.value.include_root else true end ) as $inc_root
                 | ( $e.value.depth // "infinite" ) as $depth
                 | "rule|\($e.key)|params|\($inc_root)|\($depth)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)"
             ),
