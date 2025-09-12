@@ -40,6 +40,7 @@ declare -A CONFIG=(
     [find_optimization]="true"
     [recursive_optimization]="true"
     [output_format]="text"
+    [max_depth]=""
 )
 
 # Runtime state service - encapsulates all runtime state
@@ -754,11 +755,26 @@ enumerate_paths_simple() {
             echo "$root"
         fi
         
-        if [[ "$recurse" == "true" && -d "$root" ]]; then
-            if [[ "${CONFIG[find_optimization]}" == "true" ]]; then
-                find "$root" -mindepth 1 -type f -o -type d 2>/dev/null || true
+        if [[ -d "$root" ]]; then
+            if [[ "$recurse" == "true" ]]; then
+                # Recursive mode - use maxdepth if specified
+                local -a find_args=("$root" -mindepth 1)
+                if [[ -n "${CONFIG[max_depth]}" && "${CONFIG[max_depth]}" =~ ^[0-9]+$ ]]; then
+                    find_args+=(-maxdepth "${CONFIG[max_depth]}")
+                fi
+                
+                if [[ "${CONFIG[find_optimization]}" == "true" ]]; then
+                    find_args+=(-type f -o -type d)
+                fi
+                
+                find "${find_args[@]}" 2>/dev/null || true
             else
-                find "$root" -mindepth 1 2>/dev/null || true
+                # Non-recursive mode - include immediate children only (depth 1)
+                if [[ "${CONFIG[find_optimization]}" == "true" ]]; then
+                    find "$root" -mindepth 1 -maxdepth 1 -type f -o -type d 2>/dev/null || true
+                else
+                    find "$root" -mindepth 1 -maxdepth 1 2>/dev/null || true
+                fi
             fi
         fi
     done
@@ -1039,6 +1055,15 @@ set_output_format() {
     esac
 }
 
+set_max_depth() {
+    local -r depth="$1"
+    if [[ "$depth" =~ ^[0-9]+$ ]] && [[ "$depth" -ge 1 ]]; then
+        CONFIG[max_depth]="$depth"
+    else
+        fail "$EXIT_INVALID_ARGS" "Invalid max depth '$depth' (must be a positive integer)"
+    fi
+}
+
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -1060,6 +1085,11 @@ parse_arguments() {
                 local value
                 value="$(get_option_value "$1" "${2:-}")"
                 set_output_format "$value"
+                if [[ "$1" == *=* ]]; then shift; else shift 2; fi ;;
+            --max-depth|--max-depth=*)
+                local value
+                value="$(get_option_value "$1" "${2:-}")"
+                set_max_depth "$value"
                 if [[ "$1" == *=* ]]; then shift; else shift 2; fi ;;
             --no-color)
                 CONFIG[color_mode]="never"
@@ -1109,6 +1139,7 @@ Options:
   --no-color          Disable colors (equivalent to --color never)
   --mask VALUE        Mask handling: auto|skip|<rwx> (default: auto)
   -o, --output-format FORMAT  Output format: text|json|jsonl (default: text)
+  --max-depth N       Maximum recursion depth (default: unlimited)
   --dry-run           Simulate without making changes
   -q, --quiet         Suppress informational output (errors still shown)
 

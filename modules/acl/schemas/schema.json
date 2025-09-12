@@ -252,6 +252,11 @@
                     "default": false,
                     "description": "Recurse under each root."
                 },
+                "max_depth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum recursion depth when recurse is true. If not specified, recursion is unlimited."
+                },
                 "include_self": {
                     "type": "boolean",
                     "default": true,
