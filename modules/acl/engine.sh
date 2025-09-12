@@ -411,7 +411,10 @@ on_unexpected_error() {
     log_error "Failed command: $command"
     exit 1
 }
-trap on_unexpected_error ERR
+# Only set ERR trap when running as the main script, not when sourced in tests
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    trap on_unexpected_error ERR
+fi
 
 fail() {
     local -r exit_code="$1"; shift
@@ -425,6 +428,8 @@ fail() {
 
 # Dependency validation
 validate_dependencies() {
+    # Clear any hashed command lookup to respect PATH changes in tests
+    hash -r 2>/dev/null || true
     local missing_deps=()
     for cmd in "${REQUIRED_COMMANDS[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -433,7 +438,8 @@ validate_dependencies() {
     done
 
     if [[ ${#missing_deps[@]} -gt 0 ]]; then
-        fail "$EXIT_MISSING_DEPS" "Missing required dependencies: ${missing_deps[*]}"
+        log_error "Missing required dependencies: ${missing_deps[*]}"
+        return 1
     fi
 }
 
@@ -577,6 +583,61 @@ match_regex() {
         shopt -u nocasematch
         return $result
     fi
+}
+
+# Determine if a path matches any pattern in a newline-separated list
+# Returns 0 (true) if list is empty or any pattern matches, 1 (false) otherwise
+pattern_list_matches() {
+	local -r path="$1" patterns_nl="$2" syntax="$3" match_base="$4" case_sensitive="$5"
+	# Empty list means match
+	[[ -z "$patterns_nl" ]] && return 0
+	local base="$(basename -- "$path")"
+	while IFS= read -r patt; do
+		[[ -n "$patt" ]] || continue
+		if [[ "$syntax" == "regex" ]]; then
+			if match_regex "$path" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+			if [[ "$match_base" == "true" ]] && match_regex "$base" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+		else
+			if match_glob "$path" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+			if [[ "$match_base" == "true" ]] && match_glob "$base" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+		fi
+	done <<< "$patterns_nl"
+	return 1
+}
+
+# Determine if a path is excluded by any pattern in a newline-separated list
+# Returns 0 (true) if excluded, 1 (false) otherwise
+pattern_list_excludes() {
+	local -r path="$1" patterns_nl="$2" syntax="$3" match_base="$4" case_sensitive="$5"
+	[[ -z "$patterns_nl" ]] && return 1
+	local base="$(basename -- "$path")"
+	while IFS= read -r patt; do
+		[[ -n "$patt" ]] || continue
+		if [[ "$syntax" == "regex" ]]; then
+			if match_regex "$path" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+			if [[ "$match_base" == "true" ]] && match_regex "$base" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+		else
+			if match_glob "$path" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+			if [[ "$match_base" == "true" ]] && match_glob "$base" "$patt" "$case_sensitive"; then
+				return 0
+			fi
+		fi
+	done <<< "$patterns_nl"
+	return 1
 }
 
 # Rule data accessors
@@ -794,8 +855,8 @@ execute_rule() {
         return 0
     }
     
-    local recurse include_self types_csv
-    IFS=$'\t' read -r recurse include_self types_csv _ _ _ _ <<< "$params"
+    local recurse include_self types_csv pattern_syntax match_base case_sensitive _apply_defaults
+    IFS=$'\t' read -r recurse include_self types_csv pattern_syntax match_base case_sensitive _apply_defaults <<< "$params"
     
     local -a roots=() file_specs=() dir_specs=() def_specs=()
     local roots_data file_specs_data dir_specs_data def_specs_data
@@ -842,8 +903,14 @@ execute_rule() {
         # Default to both if nothing specified
         [[ $want_files -eq 0 && $want_dirs -eq 0 ]] && { want_files=1; want_dirs=1; }
     else
-        [[ ",${types_csv}," == *,file,* ]] && want_files=1
-        [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
+        # Normalize CSV to lowercase and accept plurals
+        local lowered=",$(echo "$types_csv" | tr 'A-Z' 'a-z'),"
+        if [[ "$lowered" == *",file,"* || "$lowered" == *",files,"* ]]; then
+            want_files=1
+        fi
+        if [[ "$lowered" == *",directory,"* || "$lowered" == *",directories,"* || "$lowered" == *",dirs,"* ]]; then
+            want_dirs=1
+        fi
     fi
     
     # Choose strategy
@@ -877,6 +944,12 @@ execute_rule() {
                     local path_type
                     path_type=$(get_path_type "$path")
                     [[ "$path_type" == "file" ]] || continue
+                    # Include/exclude filtering
+                    local includes excludes
+                    includes=$(get_rule_data "$rule_idx" "includes")
+                    excludes=$(get_rule_data "$rule_idx" "excludes")
+                    pattern_list_matches "$path" "$includes" "$pattern_syntax" "$match_base" "$case_sensitive" || continue
+                    pattern_list_excludes "$path" "$excludes" "$pattern_syntax" "$match_base" "$case_sensitive" && continue
                     ((file_count++))
                 done
                 if [[ $file_count -gt 0 ]]; then
@@ -890,6 +963,12 @@ execute_rule() {
                     local path_type
                     path_type=$(get_path_type "$path")
                     [[ "$path_type" == "file" ]] || continue
+                    # Include/exclude filtering
+                    local includes excludes
+                    includes=$(get_rule_data "$rule_idx" "includes")
+                    excludes=$(get_rule_data "$rule_idx" "excludes")
+                    pattern_list_matches "$path" "$includes" "$pattern_syntax" "$match_base" "$case_sensitive" || continue
+                    pattern_list_excludes "$path" "$excludes" "$pattern_syntax" "$match_base" "$case_sensitive" && continue
                     if ! apply_acl_strategy "individual" "$path" "false" "${file_specs[@]}"; then
                         root_failed=1
                     fi
@@ -913,6 +992,12 @@ execute_rule() {
                     local path_type
                     path_type=$(get_path_type "$path")
                     [[ "$path_type" == "directory" ]] || continue
+                    # Include/exclude filtering
+                    local includes excludes
+                    includes=$(get_rule_data "$rule_idx" "includes")
+                    excludes=$(get_rule_data "$rule_idx" "excludes")
+                    pattern_list_matches "$path" "$includes" "$pattern_syntax" "$match_base" "$case_sensitive" || continue
+                    pattern_list_excludes "$path" "$excludes" "$pattern_syntax" "$match_base" "$case_sensitive" && continue
                     ((dir_count++))
                 done
                 if [[ $dir_count -gt 0 ]]; then
@@ -926,6 +1011,12 @@ execute_rule() {
                     local path_type
                     path_type=$(get_path_type "$path")
                     [[ "$path_type" == "directory" ]] || continue
+                    # Include/exclude filtering
+                    local includes excludes
+                    includes=$(get_rule_data "$rule_idx" "includes")
+                    excludes=$(get_rule_data "$rule_idx" "excludes")
+                    pattern_list_matches "$path" "$includes" "$pattern_syntax" "$match_base" "$case_sensitive" || continue
+                    pattern_list_excludes "$path" "$excludes" "$pattern_syntax" "$match_base" "$case_sensitive" && continue
                     if ! apply_acl_strategy "individual" "$path" "false" "${dir_specs[@]}"; then
                         root_failed=1
                     fi
@@ -947,6 +1038,12 @@ execute_rule() {
                 for path in "${paths[@]}"; do
                     path_under_any_filter "$path" || continue
                     [[ -d "$path" ]] || continue
+                    # Include/exclude filtering
+                    local includes excludes
+                    includes=$(get_rule_data "$rule_idx" "includes")
+                    excludes=$(get_rule_data "$rule_idx" "excludes")
+                    pattern_list_matches "$path" "$includes" "$pattern_syntax" "$match_base" "$case_sensitive" || continue
+                    pattern_list_excludes "$path" "$excludes" "$pattern_syntax" "$match_base" "$case_sensitive" && continue
                     ((default_dir_count++))
                 done
                 if [[ $default_dir_count -gt 0 ]]; then
@@ -958,6 +1055,12 @@ execute_rule() {
                 for path in "${paths[@]}"; do
                     path_under_any_filter "$path" || continue
                     [[ -d "$path" ]] || continue
+                    # Include/exclude filtering
+                    local includes excludes
+                    includes=$(get_rule_data "$rule_idx" "includes")
+                    excludes=$(get_rule_data "$rule_idx" "excludes")
+                    pattern_list_matches "$path" "$includes" "$pattern_syntax" "$match_base" "$case_sensitive" || continue
+                    pattern_list_excludes "$path" "$excludes" "$pattern_syntax" "$match_base" "$case_sensitive" && continue
                     if ! apply_acl_strategy "individual" "$path" "true" "${def_specs[@]}"; then
                         root_failed=1
                     fi

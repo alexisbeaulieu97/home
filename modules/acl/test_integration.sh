@@ -380,6 +380,48 @@ test_performance_simulation() {
     log_test_info "Performance test completed in ${duration}s"
 }
 
+# Integration test: include/exclude filtering and plural types
+test_include_exclude_and_plural_types() {
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    mkdir -p "$tmpdir/dirA" "$tmpdir/dirB"
+    touch "$tmpdir/dirA/keep.txt" "$tmpdir/dirA/skip.tmp" "$tmpdir/dirB/keep.py" "$tmpdir/dirB/skip.log"
+    local cfg="$tmpdir/rules.json"
+    cat >"$cfg" <<CFG
+{
+  "version": "1.0",
+  "rules": [
+    {
+      "roots": ["$tmpdir"],
+      "recurse": true,
+      "match": {
+        "types": ["files", "directories"],
+        "pattern_syntax": "glob",
+        "include": ["**/*.txt", "**/*.py"],
+        "exclude": ["**/*.tmp", "**/*.log"]
+      },
+      "acl": {
+        "files": ["o::r--"],
+        "directories": ["o::r-x"]
+      }
+    }
+  ]
+}
+CFG
+    # Mock groups so group checks don't fail unexpectedly
+    create_mock_groups
+    
+    # Run in dry-run and ensure only keep files are mentioned in output
+    local result exit_code=0
+    result=$("$ENGINE_SCRIPT" -f "$cfg" --dry-run 2>&1) || exit_code=$?
+    assert_equals "0" "$exit_code" "include/exclude and plural types should succeed"
+    assert_contains "$result" "keep.txt" "should include .txt file"
+    assert_contains "$result" "keep.py" "should include .py file"
+    assert_not_contains "$result" "skip.tmp" "should exclude .tmp file"
+    assert_not_contains "$result" "skip.log" "should exclude .log file"
+    rm -rf "$tmpdir"
+}
+
 # Run all integration tests
 run_integration_tests() {
     start_test_suite "Integration Tests"
@@ -394,6 +436,9 @@ run_integration_tests() {
     run_test "file_type_handling" test_file_type_handling
     run_test "complex_pattern_matching" test_complex_pattern_matching
     run_test "performance_simulation" test_performance_simulation
+    
+    # New: include/exclude filtering and plural types
+    run_test "include_exclude_and_plural_types" test_include_exclude_and_plural_types
     
     end_test_suite "Integration Tests"
 }

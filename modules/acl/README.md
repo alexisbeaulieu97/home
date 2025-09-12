@@ -44,7 +44,7 @@ engine.sh -f FILE [OPTIONS] [PATH...]
       "recurse": true,
       "include_self": true,
       "match": {
-        "types": ["file", "directory"],
+        "types": ["files", "directories"],
         "pattern_syntax": "glob",
         "include": ["**/*"],
         "exclude": ["*.tmp", ".git/**"]
@@ -86,7 +86,7 @@ engine.sh -f FILE [OPTIONS] [PATH...]
 ### Match Filtering
 ```json
 "match": {
-  "types": ["file", "directory"],     // Target types
+  "types": ["file", "directory"],     // Target types (also accepts "files", "directories")
   "pattern_syntax": "glob",           // "glob" or "regex"
   "include": ["**/*.py", "*.conf"],   // Include patterns
   "exclude": ["*.tmp", ".git/**"],    // Exclude patterns
