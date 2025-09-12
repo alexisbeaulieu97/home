@@ -77,19 +77,19 @@ add_rule_summary() {
     local rule_idx="$1"
     local status="$2"  # "success", "failed", "skipped"
     local message="$3"
-    
+
     # Get rule information
     local roots_data file_specs_data dir_specs_data def_specs_data
     roots_data=$(get_rule_data "$rule_idx" "roots")
     file_specs_data=$(get_rule_data "$rule_idx" "file_specs")
     dir_specs_data=$(get_rule_data "$rule_idx" "dir_specs")
     def_specs_data=$(get_rule_data "$rule_idx" "def_specs")
-    
+
     # Build ACL specs array - collect unique specs to avoid duplication
     local -A unique_specs=()
     local acl_specs=""
     local separator=""
-    
+
     # Collect from all spec types
     if [[ -n "$file_specs_data" ]]; then
         while IFS= read -r spec; do
@@ -106,14 +106,14 @@ add_rule_summary() {
             [[ -n "$spec" ]] && unique_specs["$spec"]=1
         done <<< "$def_specs_data"
     fi
-    
+
     # Build JSON array from unique specs
     for spec in "${!unique_specs[@]}"; do
         local esc
         esc=$(printf '%s' "$spec" | json_escape_string)
-        acl_specs+="${separator}${esc}" && separator="," 
+        acl_specs+="${separator}${esc}" && separator=","
     done
-    
+
     # Build roots array
     local roots_array=""
     local root_separator=""
@@ -122,10 +122,10 @@ add_rule_summary() {
             [[ -n "$root" ]] || continue
             local esc
             esc=$(printf '%s' "$root" | json_escape_string)
-            roots_array+="${root_separator}${esc}" && root_separator="," 
+            roots_array+="${root_separator}${esc}" && root_separator=","
         done <<< "$roots_data"
     fi
-    
+
     # Escape message
     local esc_message
     esc_message=$(printf '%s' "$message" | json_escape_string)
@@ -140,7 +140,7 @@ add_rule_summary() {
     }
 EOF
 )
-    
+
     # Add to rule summaries
     if [[ -n "${JSON_OUTPUT[rule_summaries]}" ]]; then
         JSON_OUTPUT[rule_summaries]="${JSON_OUTPUT[rule_summaries]},$rule_json"
@@ -200,10 +200,10 @@ cache_all_rules() {
                 "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.max_depth // "")"
             ),
             ($e.value.roots as $r | if ($r|type)=="string" then $r else ($r[]) end | "rule|\($e.key)|root|\(.)"),
-            ($e.value.acl as $acl | 
-                if ($acl|type)=="array" then 
+            ($e.value.acl as $acl |
+                if ($acl|type)=="array" then
                     ($acl | .[] | if type == "string" then . else specfmt(.) end | select(length>0) | "rule|\($e.key)|file_spec|\(.)", "rule|\($e.key)|dir_spec|\(.)")
-                else 
+                else
                     (($acl.files // []) | .[] | if type == "string" then . else specfmt(.) end | select(length>0) | "rule|\($e.key)|file_spec|\(.)")?,
                     (($acl.directories // []) | .[] | if type == "string" then . else specfmt(.) end | select(length>0) | "rule|\($e.key)|dir_spec|\(.)")?
                 end
@@ -344,11 +344,11 @@ _log_unless_quiet() {
 _collect_for_json() {
     local -r type="$1"; shift
     local message="$*"
-    
+
     if [[ "${CONFIG[output_format]}" == "json" || "${CONFIG[output_format]}" == "jsonl" ]]; then
         # Escape message for JSON as a fully quoted JSON string
         message=$(printf '%s' "$message" | json_escape_string)
-        
+
         case "$type" in
             error)
                 if [[ -n "${JSON_OUTPUT[errors]}" ]]; then
@@ -505,10 +505,10 @@ validate_target_paths() {
 validate_groups() {
     # Skip if getent not available
     command -v getent >/dev/null 2>&1 || return 0
-    
+
     local rules_count
     rules_count=$(cache_get rules "rules_count")
-    
+
     local -A groups_to_check=()
     for ((i=0; i<rules_count; i++)); do
         local file_specs dir_specs def_specs
@@ -528,7 +528,7 @@ validate_groups() {
             done <<< "$def_specs"
         fi
     done
-    
+
     local missing_groups=()
     for group in "${!groups_to_check[@]}"; do
         [[ -n "$group" ]] || continue
@@ -542,7 +542,7 @@ validate_groups() {
             cache_set groups "$group" "missing"
         fi
     done
-    
+
     if [[ ${#missing_groups[@]} -gt 0 ]]; then
         log_warning "Groups not found on system: ${missing_groups[*]}"
     fi
@@ -555,11 +555,11 @@ validate_groups() {
 # Path utility service
 get_path_type() {
     local -r path="$1"
-    
+
     if cache_get types "$path"; then
         return 0
     fi
-    
+
     local path_type=""
     if [[ -f "$path" ]]; then
         path_type="file"
@@ -568,7 +568,7 @@ get_path_type() {
     else
         path_type="unknown"
     fi
-    
+
     cache_set types "$path" "$path_type"
     echo "$path_type"
 }
@@ -605,7 +605,7 @@ is_command_resolvable() {
 path_under_any_filter() {
     local -r path="$1"
     [[ ${#target_paths[@]} -eq 0 ]] && return 0
-    
+
     for filter in "${target_paths[@]}"; do
         if [[ "$path" == "$filter" || "$path" == "$filter"/* ]]; then
             return 0
@@ -930,18 +930,18 @@ get_rule_params() {
 build_setfacl_command() {
     local -r path="$1" is_default="$2"; shift 2
     local -a specs=("$@")
-    
+
     local -a args=("setfacl")
     [[ "${CONFIG[no_recalc_mask]}" == "true" ]] && args+=("-n")
     [[ "$is_default" == "true" ]] && args+=("-d")
-    
+
     for spec in "${specs[@]}"; do
         args+=("-m" "$spec")
     done
-    
+
     [[ "${CONFIG[mask_setting]}" == "explicit" ]] && \
         args+=("-m" "m::${CONFIG[mask_explicit]}")
-    
+
     args+=("--" "$path")
     printf '%s\n' "${args[@]}"
 }
@@ -950,17 +950,17 @@ build_setfacl_command() {
 execute_setfacl() {
     local -r path="$1" is_default="$2"; shift 2
     local -a specs=("$@")
-    
+
     [[ ${#specs[@]} -gt 0 ]] || return 0
-    
+
     local -a cmd_args
     mapfile -t cmd_args < <(build_setfacl_command "$path" "$is_default" "${specs[@]}")
-    
+
     # Track bulk operations for progress reporting
     RUNTIME_STATE[bulk_operations]=$((${RUNTIME_STATE[bulk_operations]} + 1))
     local bulk_ops=${RUNTIME_STATE[bulk_operations]}
     local verbose_threshold=${RUNTIME_STATE[bulk_verbose_threshold]}
-    
+
     if [[ "${CONFIG[dry_run]}" == "true" ]]; then
         # Only log individual operations if under threshold or at specific intervals
         if [[ $bulk_ops -le $verbose_threshold ]] || [[ $((bulk_ops % 50)) -eq 0 ]]; then
@@ -973,14 +973,14 @@ execute_setfacl() {
         RUNTIME_STATE[entries_attempted]=$((${RUNTIME_STATE[entries_attempted]} + ${#specs[@]}))
         return 0
     fi
-    
+
     # Show progress for real operations too
     if [[ $bulk_ops -le $verbose_threshold ]] || [[ $((bulk_ops % 50)) -eq 0 ]]; then
         if [[ $bulk_ops -gt $verbose_threshold ]]; then
             log_progress "Applied ACLs to $bulk_ops individual paths..."
         fi
     fi
-    
+
     if "${cmd_args[@]}" 2>&1; then
         RUNTIME_STATE[entries_attempted]=$((${RUNTIME_STATE[entries_attempted]} + ${#specs[@]}))
         return 0
@@ -1004,13 +1004,13 @@ apply_acl_strategy() {
 apply_strategy_direct_recursive() {
     local -r path="$1" is_default="$2"; shift 2
     local -a specs=("$@")
-    
+
     [[ ${#specs[@]} -gt 0 ]] || return 0
-    
+
     local -a cmd_args
     mapfile -t cmd_args < <(build_setfacl_command "$path" "$is_default" "${specs[@]}")
-    
-    # Add recursive flag  
+
+    # Add recursive flag
     local -a final_args=()
     for arg in "${cmd_args[@]}"; do
         if [[ "$arg" == "setfacl" ]]; then
@@ -1019,13 +1019,13 @@ apply_strategy_direct_recursive() {
             final_args+=("$arg")
         fi
     done
-    
+
     if [[ "${CONFIG[dry_run]}" == "true" ]]; then
         log_info "DRY-RUN: ${final_args[*]}"
         RUNTIME_STATE[entries_attempted]=$((${RUNTIME_STATE[entries_attempted]} + ${#specs[@]}))
         return 0
     fi
-    
+
     if "${final_args[@]}" 2>&1; then
         RUNTIME_STATE[entries_attempted]=$((${RUNTIME_STATE[entries_attempted]} + ${#specs[@]}))
         return 0
@@ -1048,7 +1048,7 @@ apply_strategy_individual() {
 # Rule analysis service
 can_use_recursive_optimization() {
     local -r rule_idx="$1"
-    
+
     # Disabled by configuration
     [[ "${CONFIG[recursive_optimization]}" == "true" ]] || return 1
 
@@ -1056,15 +1056,15 @@ can_use_recursive_optimization() {
     if [[ ${#target_paths[@]} -gt 0 ]]; then
         return 1
     fi
-    
+
     # Get rule parameters
     local params
     params=$(get_rule_params "$rule_idx")
     [[ -n "$params" ]] || return 1
-    
+
     local recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth
     IFS=$'\t' read -r recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth <<< "$params"
-    
+
     # Check if rule is recursive and includes self
     [[ "$recurse" == "true" ]] || return 1
     [[ "$include_self" == "true" ]] || return 1
@@ -1078,12 +1078,12 @@ can_use_recursive_optimization() {
         [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
     fi
     [[ $want_files -eq 1 && $want_dirs -eq 1 ]] || return 1
-    
-    # Check for include/exclude patterns  
+
+    # Check for include/exclude patterns
     local includes excludes
     includes=$(get_rule_data "$rule_idx" "includes")
     excludes=$(get_rule_data "$rule_idx" "excludes")
-    
+
     # If we have any patterns, can't use optimization
     [[ -z "$includes" && -z "$excludes" ]] || return 1
 
@@ -1102,7 +1102,7 @@ can_use_recursive_optimization() {
     f_hash=$(printf '%s\n' "$file_specs_data" | sort -u | tr -d '\n' | sha1sum 2>/dev/null | awk '{print $1}')
     d_hash=$(printf '%s\n' "$dir_specs_data" | sort -u | tr -d '\n' | sha1sum 2>/dev/null | awk '{print $1}')
     [[ -n "$f_hash" && -n "$d_hash" && "$f_hash" == "$d_hash" ]] || return 1
-    
+
     return 0
 }
 
@@ -1110,14 +1110,14 @@ can_use_recursive_optimization() {
 enumerate_paths_simple() {
     local -r recurse="$1" include_self="$2" rule_max_depth_override="$3"; shift 3
     local -a roots=("$@")
-    
+
     for root in "${roots[@]}"; do
         [[ -e "$root" ]] || continue
-        
+
         if [[ "$include_self" == "true" ]]; then
             echo "$root"
         fi
-        
+
         if [[ -d "$root" ]]; then
             if [[ "$recurse" == "true" ]]; then
                 # Recursive mode - use maxdepth if specified
@@ -1131,11 +1131,11 @@ enumerate_paths_simple() {
                 if [[ -n "$effective_depth" && "$effective_depth" =~ ^[0-9]+$ ]]; then
                     find_args+=(-maxdepth "$effective_depth")
                 fi
-                
+
                 if [[ "${CONFIG[find_optimization]}" == "true" ]]; then
                     find_args+=(\( -type f -o -type d \))
                 fi
-                
+
                 find "${find_args[@]}" 2>/dev/null || true
             else
                 # Non-recursive mode - include immediate children only (depth 1)
@@ -1152,9 +1152,9 @@ enumerate_paths_simple() {
 # Main rule execution service - simplified and focused
 execute_rule() {
     local -r rule_idx="$1"
-    
+
     log_processing "Rule $((rule_idx + 1))"
-    
+
     # Get rule data
     local params
     params=$(get_rule_params "$rule_idx")
@@ -1162,17 +1162,17 @@ execute_rule() {
         log_warning "No parameters for rule $rule_idx"
         return 0
     }
-    
+
     local recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth
     IFS=$'\t' read -r recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth <<< "$params"
-    
+
     local -a roots=() file_specs=() dir_specs=() def_specs=()
     local roots_data file_specs_data dir_specs_data def_specs_data
     roots_data=$(get_rule_data "$rule_idx" "roots")
     file_specs_data=$(get_rule_data "$rule_idx" "file_specs")
     dir_specs_data=$(get_rule_data "$rule_idx" "dir_specs")
     def_specs_data=$(get_rule_data "$rule_idx" "def_specs")
-    
+
     if [[ -n "$roots_data" ]]; then
         mapfile -t roots <<< "$roots_data"
     fi
@@ -1185,14 +1185,14 @@ execute_rule() {
     if [[ -n "$def_specs_data" ]]; then
         mapfile -t def_specs <<< "$def_specs_data"
     fi
-    
+
     # Filter valid roots
     local -a valid_roots=()
     for root in "${roots[@]}"; do
         [[ -n "$root" && -e "$root" ]] || continue
         path_under_any_filter "$root" && valid_roots+=("$root")
     done
-    
+
     [[ ${#valid_roots[@]} -gt 0 ]] || {
         log_info "No valid roots for rule $((rule_idx + 1))"
         RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
@@ -1202,7 +1202,7 @@ execute_rule() {
         fi
         return $RETURN_SKIPPED
     }
-    
+
     # Determine file/directory wants
     local want_files=0 want_dirs=0
     if [[ -z "$types_csv" || "$types_csv" == "," ]]; then
@@ -1215,7 +1215,7 @@ execute_rule() {
         [[ ",${types_csv}," == *,file,* ]] && want_files=1
         [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
     fi
-    
+
     # Choose strategy
     local strategy="individual"
     if can_use_recursive_optimization "$rule_idx"; then
@@ -1223,13 +1223,13 @@ execute_rule() {
         RUNTIME_STATE[optimized_rules]=$((${RUNTIME_STATE[optimized_rules]} + 1))
         log_info "Using direct recursive optimization"
     fi
-    
+
     local rule_failed=0
-    
+
     # Apply strategy to roots
     for root in "${valid_roots[@]}"; do
         local root_failed=0
-        
+
         # Short-circuit root if it doesn't intersect requested targets
         if ! path_intersects_any_filter "$root"; then
             RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
@@ -1268,7 +1268,7 @@ execute_rule() {
                 if [[ $file_count -gt 0 ]]; then
                     log_progress "Processing $file_count files individually..."
                 fi
-                
+
                 # Reset bulk operations counter for this section
                 RUNTIME_STATE[bulk_operations]=0
                 for path in "${ordered_paths[@]}"; do
@@ -1289,7 +1289,7 @@ execute_rule() {
                 done
             fi
         fi
-        
+
         # Apply directory specs
         if [[ $want_dirs -eq 1 && ${#dir_specs[@]} -gt 0 ]]; then
             if [[ "$strategy" == "direct_recursive" ]]; then
@@ -1320,8 +1320,8 @@ execute_rule() {
                 if [[ $dir_count -gt 0 ]]; then
                     log_progress "Processing $dir_count directories individually..."
                 fi
-                
-                # Reset bulk operations counter for this section  
+
+                # Reset bulk operations counter for this section
                 RUNTIME_STATE[bulk_operations]=0
                 for path in "${ordered_paths[@]}"; do
                     if ! path_under_any_filter "$path"; then
@@ -1341,7 +1341,7 @@ execute_rule() {
                 done
             fi
         fi
-        
+
         # Apply default specs to directories, but only if directories are targeted by types
         if [[ ${#def_specs[@]} -gt 0 && $want_dirs -eq 1 ]]; then
             local -a paths
@@ -1365,7 +1365,7 @@ execute_rule() {
             if [[ $default_dir_count -gt 0 ]]; then
                 log_progress "Processing default ACLs for $default_dir_count directories individually..."
             fi
-            
+
             # Reset bulk operations counter for this section
             RUNTIME_STATE[bulk_operations]=0
             for path in "${ordered_paths[@]}"; do
@@ -1383,7 +1383,7 @@ execute_rule() {
                 fi
             done
         fi
-        
+
         if [[ $root_failed -eq 0 ]]; then
             RUNTIME_STATE[total_applied]=$((${RUNTIME_STATE[total_applied]} + 1))
             if [[ "$strategy" == "direct_recursive" ]]; then
@@ -1397,7 +1397,7 @@ execute_rule() {
             rule_failed=1
         fi
     done
-    
+
     # Collect rule summary for JSON output
     if [[ "${CONFIG[output_format]}" == "json" ]]; then
         if [[ $rule_failed -eq 0 ]]; then
@@ -1406,7 +1406,7 @@ execute_rule() {
             add_rule_summary "$rule_idx" "failed" "Rule failed for some paths"
         fi
     fi
-    
+
     return $rule_failed
 }
 
@@ -1536,7 +1536,7 @@ parse_arguments() {
                 break ;;
         esac
     done
-    
+
     target_paths=("$@")
 }
 
@@ -1608,11 +1608,11 @@ determine_target_paths() {
 apply_all_rules() {
     local rules_count
     rules_count=$(cache_get rules "rules_count")
-    
+
     local apply_order
     apply_order=$(cache_get rules "apply_order")
     log_info "Apply order: $apply_order"
-    
+
     local total_rule_failures=0
     for ((i=0; i<rules_count; i++)); do
         log_bold "---------- PROCESSING RULE $((i+1)) ------------"
@@ -1620,23 +1620,23 @@ apply_all_rules() {
             ((total_rule_failures++))
         fi
     done
-    
+
     # Summary
     local entries_ok=$((${RUNTIME_STATE[entries_attempted]} - ${RUNTIME_STATE[entries_failed]}))
     local success_pct=100
     if [[ ${RUNTIME_STATE[entries_attempted]} -gt 0 ]]; then
         success_pct=$(( entries_ok * 100 / ${RUNTIME_STATE[entries_attempted]} ))
     fi
-    
+
     local summary_suffix=""
     [[ "${CONFIG[dry_run]}" == "true" ]] && summary_suffix=" (dry-run)"
-    
+
     log_bold "Summary${summary_suffix}: paths ok=${RUNTIME_STATE[total_applied]} failed=${RUNTIME_STATE[total_failed]} skipped=${RUNTIME_STATE[total_skipped]} optimized=${RUNTIME_STATE[optimized_rules]}"
     log_bold "           entries ok=$entries_ok failed=${RUNTIME_STATE[entries_failed]} attempted=${RUNTIME_STATE[entries_attempted]} (${success_pct}% ok)"
-    
+
     # Performance metrics
     log_info "Performance: cache_hits=${RUNTIME_STATE[cache_hits]} optimized_rules=${RUNTIME_STATE[optimized_rules]}"
-    
+
     return $total_rule_failures
 }
 
@@ -1674,15 +1674,15 @@ generate_json_run_metadata() {
     local exit_code="$1"
     local duration_ms=""
     local timestamp_iso=""
-    
+
     if [[ -n "${RUNTIME_STATE[start_time]}" ]]; then
         timestamp_iso=$(format_timestamp $((${RUNTIME_STATE[start_time]} / 1000)))
     fi
-    
+
     if [[ -n "${RUNTIME_STATE[start_time]}" && -n "${RUNTIME_STATE[end_time]}" ]]; then
         duration_ms=$(( ${RUNTIME_STATE[end_time]} - ${RUNTIME_STATE[start_time]} ))
     fi
-    
+
     cat << EOF
   "run": {
     "timestamp": "$timestamp_iso",
@@ -1699,7 +1699,7 @@ generate_json_metrics() {
     if [[ ${RUNTIME_STATE[entries_attempted]} -gt 0 ]]; then
         success_pct=$(( entries_ok * 100 / ${RUNTIME_STATE[entries_attempted]} ))
     fi
-    
+
     cat << EOF
   "metrics": {
     "paths": {
@@ -1781,10 +1781,12 @@ generate_jsonl_output() {
 
     # Warnings and errors
     if [[ -n "${JSON_OUTPUT[warnings]}" ]]; then
-        printf '[%s]' "${JSON_OUTPUT[warnings]}" | jq -rc '.[] | {type:"warning", message: .}'
+        # Messages in JSON_OUTPUT are already JSON-escaped strings; decode before embedding
+        printf '[%s]' "${JSON_OUTPUT[warnings]}" | jq -rc '.[] | {type:"warning", message: fromjson}'
     fi
     if [[ -n "${JSON_OUTPUT[errors]}" ]]; then
-        printf '[%s]' "${JSON_OUTPUT[errors]}" | jq -rc '.[] | {type:"error", message: .}'
+        # Messages in JSON_OUTPUT are already JSON-escaped strings; decode before embedding
+        printf '[%s]' "${JSON_OUTPUT[errors]}" | jq -rc '.[] | {type:"error", message: fromjson}'
     fi
 }
 
@@ -1793,16 +1795,16 @@ main() {
     parse_arguments "$@"
     initialize
     determine_target_paths
-    
+
     log_bold "ACL definitions from: ${CONFIG[definitions_file]}"
-    
+
     local exit_code="$EXIT_SUCCESS"
     if ! apply_all_rules; then
         exit_code="$EXIT_ERROR"
     fi
-    
+
     RUNTIME_STATE[end_time]=$(date +%s%3N)
-    
+
     # Generate output based on format
     case "${CONFIG[output_format]}" in
         json)
@@ -1810,7 +1812,7 @@ main() {
         jsonl)
             generate_jsonl_output "$exit_code" ;;
     esac
-    
+
     exit "$exit_code"
 }
 
