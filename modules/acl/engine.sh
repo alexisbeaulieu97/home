@@ -618,6 +618,26 @@ path_under_any_filter() {
     return 1
 }
 
+# Returns success (0) if the given path either contains any target filter
+# or is contained by any target filter. This ensures we don't skip a rule
+# whose root is an ancestor of a requested target subtree.
+path_intersects_any_filter() {
+    local -r path="$1"
+    [[ ${#target_paths[@]} -eq 0 ]] && return 0
+    local filter
+    for filter in "${target_paths[@]}"; do
+        # path contains filter
+        if [[ "$filter" == "$path" || "$filter" == "$path"/* ]]; then
+            return 0
+        fi
+        # path is contained by filter
+        if [[ "$path" == "$filter" || "$path" == "$filter"/* ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # Pattern matching utilities
 match_glob() {
     # Usage for internal engine: match_glob TEXT PATTERN CASE_SENSITIVE
@@ -690,22 +710,19 @@ match_regex() {
         [[ "$target" =~ $pattern ]]
         return $?
     else
-        # Case-insensitive regex: transform both sides by lowercasing target
+        # Robust case-insensitive regex using awk IGNORECASE if available,
+        # else fallback to grep -Ei, else best-effort lowercase target.
         if command -v awk >/dev/null 2>&1; then
-            local lower
-            lower=$(printf '%s' "$target" | awk '{print tolower($0)}')
-            # Best-effort: replace [A-Z] with [a-z] for simple classes; for general patterns rely on nocasematch fallback
-            shopt -s nocasematch
-            [[ "$lower" =~ $pattern ]]
-            local r=$?
-            shopt -u nocasematch
-            return $r
+            echo "$target" | awk -v pat="$pattern" 'BEGIN{IGNORECASE=1} $0 ~ pat {exit 0} {exit 1}'
+            return $?
+        elif command -v grep >/dev/null 2>&1; then
+            echo "$target" | grep -Eiq -- "$pattern"
+            return $?
         else
-            shopt -s nocasematch
-            [[ "$target" =~ $pattern ]]
-            local r=$?
-            shopt -u nocasematch
-            return $r
+            local lower
+            lower=$(printf '%s' "$target" | tr '[:upper:]' '[:lower:]')
+            [[ "$lower" =~ $pattern ]]
+            return $?
         fi
     fi
 }
@@ -1038,6 +1055,11 @@ can_use_recursive_optimization() {
     
     # Disabled by configuration
     [[ "${CONFIG[recursive_optimization]}" == "true" ]] || return 1
+
+    # If user provided target path filters, avoid -R; we need per-path filtering
+    if [[ ${#target_paths[@]} -gt 0 ]]; then
+        return 1
+    fi
     
     # Get rule parameters
     local params
@@ -1212,6 +1234,12 @@ execute_rule() {
     for root in "${valid_roots[@]}"; do
         local root_failed=0
         
+        # Short-circuit root if it doesn't intersect requested targets
+        if ! path_intersects_any_filter "$root"; then
+            RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
+            continue
+        fi
+
         # Apply file specs
         if [[ $want_files -eq 1 && ${#file_specs[@]} -gt 0 ]]; then
             if [[ "$strategy" == "direct_recursive" ]]; then
@@ -1318,8 +1346,8 @@ execute_rule() {
             fi
         fi
         
-        # Apply default specs to directories
-        if [[ ${#def_specs[@]} -gt 0 ]]; then
+        # Apply default specs to directories, but only if directories are targeted by types
+        if [[ ${#def_specs[@]} -gt 0 && $want_dirs -eq 1 ]]; then
             local -a paths
             log_progress "Enumerating paths for default ACL processing..."
             mapfile -t paths < <(enumerate_paths_simple "$recurse" "$include_self" "$rule_max_depth" "$root")
