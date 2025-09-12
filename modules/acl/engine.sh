@@ -69,12 +69,9 @@ declare -A JSON_OUTPUT=(
 
 # Function to add rule summary to JSON output
 json_escape_string() {
-    # Basic JSON string escaper: escapes backslash, quote, and control newlines
-    # shellcheck disable=SC2001
-    sed -e 's/\\/\\\\/g' \
-        -e 's/\"/\\\"/g' \
-        -e $'s/\n/\\n/g' \
-        -e $'s/\r/\\r/g'
+    # Robust JSON escaper using jq. Reads stdin and outputs JSON-safe content
+    # without surrounding quotes and without decoding escape sequences.
+    jq -R -s @json 2>/dev/null | sed -e 's/^"//' -e 's/"$//'
 }
 
 add_rule_summary() {
@@ -350,8 +347,8 @@ _collect_for_json() {
     local message="$*"
     
     if [[ "${CONFIG[output_format]}" == "json" || "${CONFIG[output_format]}" == "jsonl" ]]; then
-        # Escape quotes and backslashes in the message for JSON
-        message=$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g')
+        # Escape message for JSON (quotes, backslashes, newlines, carriage returns)
+        message=$(printf '%s' "$message" | json_escape_string)
         
         case "$type" in
             error)
