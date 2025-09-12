@@ -597,8 +597,8 @@ program_in_path() {
 # Robust command availability check that ignores current shell hash/aliases
 is_command_resolvable() {
     local -r cmd="$1"
-    # Use a clean environment with the current PATH only
-    env -i PATH="$PATH" bash -lc "command -v \"$cmd\" >/dev/null 2>&1"
+    # Use a clean environment with the current PATH only (non-login shell to avoid banners/MOTD)
+    env -i PATH="$PATH" bash -c "command -v \"$cmd\" >/dev/null 2>&1"
 }
 
 # Path filtering utility
