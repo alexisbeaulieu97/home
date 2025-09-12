@@ -69,9 +69,8 @@ declare -A JSON_OUTPUT=(
 
 # Function to add rule summary to JSON output
 json_escape_string() {
-    # Robust JSON escaper using jq. Reads stdin and outputs JSON-safe content
-    # without surrounding quotes and without decoding escape sequences.
-    jq -R -s @json 2>/dev/null | sed -e 's/^"//' -e 's/"$//'
+    # Robust JSON escaper using jq. Reads stdin and outputs a fully quoted JSON string.
+    jq -R -s @json 2>/dev/null
 }
 
 add_rule_summary() {
@@ -112,7 +111,7 @@ add_rule_summary() {
     for spec in "${!unique_specs[@]}"; do
         local esc
         esc=$(printf '%s' "$spec" | json_escape_string)
-        acl_specs+="${separator}\"$esc\"" && separator="," 
+        acl_specs+="${separator}${esc}" && separator="," 
     done
     
     # Build roots array
@@ -123,7 +122,7 @@ add_rule_summary() {
             [[ -n "$root" ]] || continue
             local esc
             esc=$(printf '%s' "$root" | json_escape_string)
-            roots_array+="${root_separator}\"$esc\"" && root_separator="," 
+            roots_array+="${root_separator}${esc}" && root_separator="," 
         done <<< "$roots_data"
     fi
     
@@ -137,7 +136,7 @@ add_rule_summary() {
       "roots": [$roots_array],
       "acl_specs": [$acl_specs],
       "status": "$status",
-      "message": "$esc_message"
+      "message": $esc_message
     }
 EOF
 )
@@ -347,7 +346,7 @@ _collect_for_json() {
     local message="$*"
     
     if [[ "${CONFIG[output_format]}" == "json" || "${CONFIG[output_format]}" == "jsonl" ]]; then
-        # Escape message for JSON (quotes, backslashes, newlines, carriage returns)
+        # Escape message for JSON as a fully quoted JSON string
         message=$(printf '%s' "$message" | json_escape_string)
         
         case "$type" in
@@ -355,13 +354,13 @@ _collect_for_json() {
                 if [[ -n "${JSON_OUTPUT[errors]}" ]]; then
                     JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]},"
                 fi
-                JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]}\"$message\""
+                JSON_OUTPUT[errors]="${JSON_OUTPUT[errors]}$message"
                 ;;
             warning)
                 if [[ -n "${JSON_OUTPUT[warnings]}" ]]; then
                     JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]},"
                 fi
-                JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]}\"$message\""
+                JSON_OUTPUT[warnings]="${JSON_OUTPUT[warnings]}$message"
                 ;;
         esac
     fi
