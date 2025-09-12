@@ -1267,6 +1267,10 @@ execute_rule() {
                 while IFS= read -r p; do ordered_paths+=("$p"); done < <(sort_paths_by_apply_order "$(cache_get rules "apply_order")" "$root" "${paths[@]}")
                 local file_count=0
                 for path in "${ordered_paths[@]}"; do
+                    # Ensure root is excluded when include_root is false
+                    if [[ "$include_root" != "true" && "$path" == "$root" ]]; then
+                        continue
+                    fi
                     if ! path_under_any_filter "$path"; then
                         RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
                         continue
@@ -1287,6 +1291,10 @@ execute_rule() {
                 # Reset bulk operations counter for this section
                 RUNTIME_STATE[bulk_operations]=0
                 for path in "${ordered_paths[@]}"; do
+                    # Ensure root is excluded when include_root is false
+                    if [[ "$include_root" != "true" && "$path" == "$root" ]]; then
+                        continue
+                    fi
                     if ! path_under_any_filter "$path"; then
                         RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
                         continue
@@ -1366,6 +1374,10 @@ execute_rule() {
             while IFS= read -r p; do ordered_paths+=("$p"); done < <(sort_paths_by_apply_order "$(cache_get rules "apply_order")" "$root" "${paths[@]}")
             local default_dir_count=0
             for path in "${ordered_paths[@]}"; do
+                # Ensure root is excluded when include_root is false
+                if [[ "$include_root" != "true" && "$path" == "$root" ]]; then
+                    continue
+                fi
                 if ! path_under_any_filter "$path"; then
                     RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
                     continue
