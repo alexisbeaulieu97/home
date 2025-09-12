@@ -428,8 +428,6 @@ fail() {
 
 # Dependency validation
 validate_dependencies() {
-    # Clear any hashed command lookup to respect PATH changes in tests
-    hash -r 2>/dev/null || true
     local missing_deps=()
     for cmd in "${REQUIRED_COMMANDS[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
