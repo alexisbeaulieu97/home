@@ -2,8 +2,8 @@
     "rules": [
         {
             "roots": "/tmp",
-            "recurse": false,
-            "include_self": true,
+            "include_root": true,
+            "depth": "infinite",
             "acl": [
                 "g:test:rwx"
             ]

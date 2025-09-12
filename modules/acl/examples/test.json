@@ -6,8 +6,8 @@
             "roots": [
                 "/tmp"
             ],
-            "recurse": false,
-            "include_self": true,
+            "include_root": true,
+            "depth": "infinite",
             "match": {
                 "types": [
                     "directory"

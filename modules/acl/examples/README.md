@@ -41,8 +41,8 @@ ajv validate -s ../schemas/schema.json -d your_config.json
   "rules": [
     {
       "roots": "/path/to/directory",
-      "recurse": true,
-      "include_self": true,
+      "include_root": true,
+      "depth": "infinite",
       "acl": ["g:groupname:rwx"]
     }
   ]

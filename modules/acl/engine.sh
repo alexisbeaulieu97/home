@@ -40,7 +40,7 @@ declare -A CONFIG=(
     [find_optimization]="true"
     [recursive_optimization]="true"
     [output_format]="text"
-    [max_depth]=""
+    
 )
 
 # Runtime state service - encapsulates all runtime state
@@ -197,7 +197,9 @@ cache_all_rules() {
         "rules_count|\(.rules|length)",
         (.rules | to_entries[] as $e |
             (
-                "rule|\($e.key)|params|\($e.value.recurse // false)|\($e.value.include_self // true)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)|\($e.value.max_depth // "")"
+                ( $e.value.include_root // true ) as $inc_root
+                | ( $e.value.depth // "infinite" ) as $depth
+                | "rule|\($e.key)|params|\($inc_root)|\($depth)|\(($e.value.match.types // ["file","directory"]) | join(","))|\($e.value.match.pattern_syntax // "glob")|\($e.value.match.match_base // true)|\($e.value.match.case_sensitive // true)"
             ),
             ($e.value.roots as $r | if ($r|type)=="string" then $r else ($r[]) end | "rule|\($e.key)|root|\(.)"),
             ($e.value.acl as $acl |
@@ -852,9 +854,9 @@ path_matches_rule_filters() {
     includes=$(get_rule_data "$rule_idx" "includes")
     excludes=$(get_rule_data "$rule_idx" "excludes")
 
-    # Parse params fields: recurse, include_self, types_csv, pattern_syntax, match_base, case_sensitive, rule_max_depth
-    local _recurse _include_self _types_csv pattern_syntax match_base case_sensitive rule_max_depth
-    IFS=$'\t' read -r _recurse _include_self _types_csv pattern_syntax match_base case_sensitive rule_max_depth <<< "$params"
+    # Parse params fields: include_root, depth, types_csv, pattern_syntax, match_base, case_sensitive
+    local _include_root _depth _types_csv pattern_syntax match_base case_sensitive
+    IFS=$'\t' read -r _include_root _depth _types_csv pattern_syntax match_base case_sensitive <<< "$params"
 
     # Defaults
     [[ -n "$pattern_syntax" ]] || pattern_syntax="glob"
@@ -1068,12 +1070,15 @@ can_use_recursive_optimization() {
     params=$(get_rule_params "$rule_idx")
     [[ -n "$params" ]] || return 1
 
-    local recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth
-    IFS=$'\t' read -r recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth <<< "$params"
+    # New params layout: include_root, depth, types_csv, pattern_syntax, match_base, case_sensitive
+    local include_root depth types_csv pattern_syntax match_base case_sensitive
+    IFS=$'\t' read -r include_root depth types_csv pattern_syntax match_base case_sensitive <<< "$params"
 
-    # Check if rule is recursive and includes self
-    [[ "$recurse" == "true" ]] || return 1
-    [[ "$include_self" == "true" ]] || return 1
+    # New semantics: can use -R only if depth is infinite and include_root is true
+    local include_root depth
+    # include_root and depth were parsed above into variables
+    [[ "$include_root" == "true" ]] || return 1
+    [[ "$depth" == "infinite" ]] || return 1
 
     # Must target both files and directories; -R cannot filter by type
     local want_files=0 want_dirs=0
@@ -1093,8 +1098,7 @@ can_use_recursive_optimization() {
     # If we have any patterns, can't use optimization
     [[ -z "$includes" && -z "$excludes" ]] || return 1
 
-    # If rule specifies max_depth, avoid using -R so we honor depth precisely
-    [[ -z "$rule_max_depth" ]] || return 1
+    # No global depth overrides anymore
 
     # Require identical file and directory specs to safely use -R
     local file_specs_data dir_specs_data
@@ -1114,42 +1118,46 @@ can_use_recursive_optimization() {
 
 # Simplified path enumeration for recursive rules
 enumerate_paths_simple() {
-    local -r recurse="$1" include_self="$2" rule_max_depth_override="$3"; shift 3
+    # Args (new semantics): include_root depth types_csv pattern_syntax match_base case_sensitive  -- roots...
+    # We only need include_root and depth here; other params are parsed elsewhere for filtering.
+    local -r include_root="$1" depth_raw="$2"; shift 2
     local -a roots=("$@")
 
     for root in "${roots[@]}"; do
         [[ -e "$root" ]] || continue
 
-        if [[ "$include_self" == "true" ]]; then
+        if [[ "$include_root" == "true" ]]; then
             echo "$root"
         fi
 
         if [[ -d "$root" ]]; then
-            if [[ "$recurse" == "true" ]]; then
-                # Recursive mode - use maxdepth if specified
-                local -a find_args=("$root" -mindepth 1)
-                local effective_depth="${rule_max_depth_override}"
-                if [[ -z "$effective_depth" ]]; then
-                    if [[ -n "${CONFIG[max_depth]}" && "${CONFIG[max_depth]}" =~ ^[0-9]+$ ]]; then
-                        effective_depth="${CONFIG[max_depth]}"
-                    fi
-                fi
-                if [[ -n "$effective_depth" && "$effective_depth" =~ ^[0-9]+$ ]]; then
-                    find_args+=(-maxdepth "$effective_depth")
-                fi
-
-                if [[ "${CONFIG[find_optimization]}" == "true" ]]; then
-                    find_args+=(\( -type f -o -type d \))
-                fi
-
-                find "${find_args[@]}" 2>/dev/null || true
-            else
-                # Non-recursive mode - include immediate children only (depth 1)
-                if [[ "${CONFIG[find_optimization]}" == "true" ]]; then
-                    find "$root" -mindepth 1 -maxdepth 1 \( -type f -o -type d \) 2>/dev/null || true
+            # Determine effective numeric depth
+            local -a find_args=("$root")
+            local eff_depth=""
+            if [[ "$depth_raw" == "infinite" ]]; then
+                eff_depth=""
+            elif [[ "$depth_raw" =~ ^[0-9]+$ ]]; then
+                if [[ "$depth_raw" -eq 0 ]]; then
+                    eff_depth="0"
                 else
-                    find "$root" -mindepth 1 -maxdepth 1 2>/dev/null || true
+                    eff_depth="$depth_raw"
                 fi
+            else
+                eff_depth=""
+            fi
+
+            if [[ "$eff_depth" == "0" ]]; then
+                : # root already emitted if include_root=true; no descendants
+            else
+                # mindepth 1 to skip the root; maxdepth only when finite
+                find_args+=( -mindepth 1 )
+                if [[ -n "$eff_depth" ]]; then
+                    find_args+=( -maxdepth "$eff_depth" )
+                fi
+                if [[ "${CONFIG[find_optimization]}" == "true" ]]; then
+                    find_args+=( \( -type f -o -type d \) )
+                fi
+                find "${find_args[@]}" 2>/dev/null || true
             fi
         fi
     done
@@ -1169,8 +1177,9 @@ execute_rule() {
         return 0
     }
 
-    local recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth
-    IFS=$'\t' read -r recurse include_self types_csv pattern_syntax match_base case_sensitive rule_max_depth <<< "$params"
+    # New params layout: include_root, depth, types_csv, pattern_syntax, match_base, case_sensitive
+    local include_root depth types_csv pattern_syntax match_base case_sensitive
+    IFS=$'\t' read -r include_root depth types_csv pattern_syntax match_base case_sensitive <<< "$params"
 
     local -a roots=() file_specs=() dir_specs=() def_specs=()
     local roots_data file_specs_data dir_specs_data def_specs_data
@@ -1252,7 +1261,7 @@ execute_rule() {
                 # For individual strategy, enumerate paths and filter files
                 local -a paths
                 log_progress "Enumerating paths for individual file processing..."
-                mapfile -t paths < <(enumerate_paths_simple "$recurse" "$include_self" "$rule_max_depth" "$root")
+                mapfile -t paths < <(enumerate_paths_simple "$include_root" "$depth" "$root")
                 # Order paths by apply_order for deterministic override behavior
                 local -a ordered_paths=()
                 while IFS= read -r p; do ordered_paths+=("$p"); done < <(sort_paths_by_apply_order "$(cache_get rules "apply_order")" "$root" "${paths[@]}")
@@ -1305,7 +1314,7 @@ execute_rule() {
             else
                 local -a paths
                 log_progress "Enumerating paths for individual directory processing..."
-                mapfile -t paths < <(enumerate_paths_simple "$recurse" "$include_self" "$rule_max_depth" "$root")
+                mapfile -t paths < <(enumerate_paths_simple "$include_root" "$depth" "$root")
                 local -a ordered_paths=()
                 while IFS= read -r p; do ordered_paths+=("$p"); done < <(sort_paths_by_apply_order "$(cache_get rules "apply_order")" "$root" "${paths[@]}")
                 local dir_count=0
@@ -1352,7 +1361,7 @@ execute_rule() {
         if [[ ${#def_specs[@]} -gt 0 && $want_dirs -eq 1 ]]; then
             local -a paths
             log_progress "Enumerating paths for default ACL processing..."
-            mapfile -t paths < <(enumerate_paths_simple "$recurse" "$include_self" "$rule_max_depth" "$root")
+            mapfile -t paths < <(enumerate_paths_simple "$include_root" "$depth" "$root")
             local -a ordered_paths=()
             while IFS= read -r p; do ordered_paths+=("$p"); done < <(sort_paths_by_apply_order "$(cache_get rules "apply_order")" "$root" "${paths[@]}")
             local default_dir_count=0
@@ -1480,14 +1489,7 @@ set_output_format() {
     esac
 }
 
-set_max_depth() {
-    local -r depth="$1"
-    if [[ "$depth" =~ ^[0-9]+$ ]] && [[ "$depth" -ge 1 ]]; then
-        CONFIG[max_depth]="$depth"
-    else
-        fail "$EXIT_INVALID_ARGS" "Invalid max depth '$depth' (must be a positive integer)"
-    fi
-}
+ 
 
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
@@ -1511,11 +1513,7 @@ parse_arguments() {
                 value="$(get_option_value "$1" "${2:-}")"
                 set_output_format "$value"
                 if [[ "$1" == *=* ]]; then shift; else shift 2; fi ;;
-            --max-depth|--max-depth=*)
-                local value
-                value="$(get_option_value "$1" "${2:-}")"
-                set_max_depth "$value"
-                if [[ "$1" == *=* ]]; then shift; else shift 2; fi ;;
+            
             --no-color)
                 CONFIG[color_mode]="never"
                 shift ;;
@@ -1564,7 +1562,7 @@ Options:
   --no-color          Disable colors (equivalent to --color never)
   --mask VALUE        Mask handling: auto|skip|<rwx> (default: auto)
   -o, --output-format FORMAT  Output format: text|json|jsonl (default: text)
-  --max-depth N       Maximum recursion depth (default: unlimited)
+  
   --dry-run           Simulate without making changes
   -q, --quiet         Suppress informational output (errors still shown)
 

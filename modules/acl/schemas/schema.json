@@ -247,20 +247,26 @@
                     ],
                     "description": "Root(s) under which this rule applies."
                 },
-                "recurse": {
-                    "type": "boolean",
-                    "default": false,
-                    "description": "Recurse under each root."
-                },
-                "max_depth": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum recursion depth when recurse is true. If not specified, recursion is unlimited."
-                },
-                "include_self": {
+                "include_root": {
                     "type": "boolean",
                     "default": true,
                     "description": "Apply ACL to the root objects themselves (true) or only to descendants (false)."
+                },
+                "depth": {
+                    "description": "Traversal depth under each root: 0 for root-only, 1 for immediate children, N for N levels, or 'infinite' for full subtree.",
+                    "oneOf": [
+                        {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        {
+                            "type": "string",
+                            "enum": [
+                                "infinite"
+                            ]
+                        }
+                    ],
+                    "default": "infinite"
                 },
                 "match": {
                     "$ref": "#/$defs/match"
@@ -305,8 +311,8 @@
                     "roots": [
                         "/srv/app"
                     ],
-                    "recurse": true,
-                    "include_self": true,
+                    "include_root": true,
+                    "depth": "infinite",
                     "match": {
                         "types": [
                             "file",

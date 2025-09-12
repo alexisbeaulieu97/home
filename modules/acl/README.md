@@ -41,8 +41,8 @@ engine.sh -f FILE [OPTIONS] [PATH...]
     {
       "id": "app-permissions",
       "roots": ["/srv/app", "/data/shared"],
-      "recurse": true,
-      "include_self": true,
+      "include_root": true,
+      "depth": "infinite",
       "match": {
         "types": ["file", "directory"],
         "pattern_syntax": "glob",
@@ -77,8 +77,8 @@ engine.sh -f FILE [OPTIONS] [PATH...]
 ### Rule Properties
 - `id` - Rule identifier (optional)
 - `roots` - Root path(s) - string or array (required)
-- `recurse` - Process subdirectories (default: false)
-- `include_self` - Apply to root paths (default: true)
+- `include_root` - Apply to root paths (default: true)
+- `depth` - 0=root only; 1=immediate children; N=N levels; "infinite"=full subtree (default: "infinite")
 - `match` - Pattern-based filtering (optional)
 - `acl` - ACL entries to apply (required)
 - `default_acl` - Default ACL for directories (optional)
@@ -144,7 +144,8 @@ Use `X` for conditional execute (directories and existing executables).
   "rules": [
     {
       "roots": "/shared/docs",
-      "recurse": true,
+      "include_root": true,
+      "depth": "infinite",
       "acl": {
         "files": ["g:editors:rw-", "o::r--"],
         "directories": ["g:editors:rwx", "o::r-x"]
@@ -160,7 +161,8 @@ Use `X` for conditional execute (directories and existing executables).
   "rules": [
     {
       "roots": "/project",
-      "recurse": true,
+      "include_root": true,
+      "depth": 0,
       "match": {
         "pattern_syntax": "glob",
         "include": ["**/*.py", "**/*.sh"],
