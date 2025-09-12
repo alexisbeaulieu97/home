@@ -981,11 +981,14 @@ execute_setfacl() {
         fi
     fi
 
-    if "${cmd_args[@]}" 2>&1; then
+    # Run command without leaking output to stdout. Capture stderr for logging.
+    local cmd_stderr=""
+    if cmd_stderr=$("${cmd_args[@]}" 2>&1 1>/dev/null); then
         RUNTIME_STATE[entries_attempted]=$((${RUNTIME_STATE[entries_attempted]} + ${#specs[@]}))
         return 0
     else
         RUNTIME_STATE[entries_failed]=$((${RUNTIME_STATE[entries_failed]} + ${#specs[@]}))
+        [[ -n "$cmd_stderr" ]] && log_error "setfacl failed for $path: $cmd_stderr"
         return 1
     fi
 }
@@ -1026,11 +1029,14 @@ apply_strategy_direct_recursive() {
         return 0
     fi
 
-    if "${final_args[@]}" 2>&1; then
+    # Run command without leaking output to stdout. Capture stderr for logging.
+    local cmd_stderr=""
+    if cmd_stderr=$("${final_args[@]}" 2>&1 1>/dev/null); then
         RUNTIME_STATE[entries_attempted]=$((${RUNTIME_STATE[entries_attempted]} + ${#specs[@]}))
         return 0
     else
         RUNTIME_STATE[entries_failed]=$((${RUNTIME_STATE[entries_failed]} + ${#specs[@]}))
+        [[ -n "$cmd_stderr" ]] && log_error "setfacl -R failed for $path: $cmd_stderr"
         return 1
     fi
 }
@@ -1792,6 +1798,18 @@ generate_jsonl_output() {
 
 main() {
     RUNTIME_STATE[start_time]=$(date +%s%3N)
+    # Defensive reset: ensure no stale data if main is invoked multiple times
+    JSON_OUTPUT[warnings]=""
+    JSON_OUTPUT[errors]=""
+    JSON_OUTPUT[rule_summaries]=""
+    RUNTIME_STATE[entries_attempted]=0
+    RUNTIME_STATE[entries_failed]=0
+    RUNTIME_STATE[cache_hits]=0
+    RUNTIME_STATE[optimized_rules]=0
+    RUNTIME_STATE[total_applied]=0
+    RUNTIME_STATE[total_failed]=0
+    RUNTIME_STATE[total_skipped]=0
+    RUNTIME_STATE[bulk_operations]=0
     parse_arguments "$@"
     initialize
     determine_target_paths
