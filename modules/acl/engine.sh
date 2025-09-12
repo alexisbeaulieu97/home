@@ -425,9 +425,6 @@ on_unexpected_error() {
     log_error "Failed command: $command"
     exit 1
 }
-if [[ "${ACL_ENGINE_DISABLE_TRAP:-0}" != "1" ]]; then
-    trap on_unexpected_error ERR
-fi
 
 fail() {
     local -r exit_code="$1"; shift
