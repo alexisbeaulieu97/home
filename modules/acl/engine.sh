@@ -635,12 +635,19 @@ path_intersects_any_filter() {
 
 # Pattern matching utilities
 match_glob() {
-    # Usage for internal engine: match_glob TEXT PATTERN CASE_SENSITIVE
-    # Tests may call with extra args (match_base and multiple patterns). Support both forms.
+    # Usage for internal engine: match_glob TEXT PATTERN CASE_SENSITIVE [MATCH_BASE] [PATTERN...]
+    # Supports being called with either 3 args (no match_base, no extra patterns)
+    # or 4+ args (explicit match_base followed by optional additional patterns).
     local text="$1" pattern="$2" case_sensitive="${3:-true}"
-    local match_base="${4:-false}"
-    shift 4 || true
-    local additional_patterns=("$@")
+    local match_base="false"
+    local additional_patterns=()
+    if [[ $# -ge 4 ]]; then
+        match_base="$4"
+        shift 4
+        additional_patterns=("$@")
+    else
+        shift 3
+    fi
 
     _glob_match_one() {
         local t="$1" p="$2" cs="$3"
