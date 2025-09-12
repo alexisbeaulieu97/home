@@ -588,29 +588,29 @@ match_regex() {
 # Determine if a path matches any pattern in a newline-separated list
 # Returns 0 (true) if list is empty or any pattern matches, 1 (false) otherwise
 pattern_list_matches() {
-	local -r path="$1" patterns_nl="$2" syntax="$3" match_base="$4" case_sensitive="$5"
-	# Empty list means match
-	[[ -z "$patterns_nl" ]] && return 0
-	local base="$(basename -- "$path")"
-	while IFS= read -r patt; do
-		[[ -n "$patt" ]] || continue
-		if [[ "$syntax" == "regex" ]]; then
-			if match_regex "$path" "$patt" "$case_sensitive"; then
-				return 0
-			fi
-			if [[ "$match_base" == "true" ]] && match_regex "$base" "$patt" "$case_sensitive"; then
-				return 0
-			fi
-		else
-			if match_glob "$path" "$patt" "$case_sensitive"; then
-				return 0
-			fi
-			if [[ "$match_base" == "true" ]] && match_glob "$base" "$patt" "$case_sensitive"; then
-				return 0
-			fi
-		fi
-	done <<< "$patterns_nl"
-	return 1
+    local -r path="$1" patterns_nl="$2" syntax="$3" match_base="$4" case_sensitive="$5"
+    # Empty list means match
+    [[ -z "$patterns_nl" ]] && return 0
+    local base="$(basename -- "$path")"
+    while IFS= read -r patt; do
+        [[ -n "$patt" ]] || continue
+        if [[ "$syntax" == "regex" ]]; then
+            if match_regex "$path" "$patt" "$case_sensitive"; then
+                return 0
+            fi
+            if [[ "$match_base" == "true" ]] && match_regex "$base" "$patt" "$case_sensitive"; then
+                return 0
+            fi
+        else
+            if match_glob "$path" "$patt" "$case_sensitive"; then
+                return 0
+            fi
+            if [[ "$match_base" == "true" ]] && match_glob "$base" "$patt" "$case_sensitive"; then
+                return 0
+            fi
+        fi
+    done <<< "$patterns_nl"
+    return 1
 }
 
 # Determine if a path is excluded by any pattern in a newline-separated list
