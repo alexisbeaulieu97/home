@@ -1075,7 +1075,6 @@ can_use_recursive_optimization() {
     IFS=$'\t' read -r include_root depth types_csv pattern_syntax match_base case_sensitive <<< "$params"
 
     # New semantics: can use -R only if depth is infinite and include_root is true
-    local include_root depth
     # include_root and depth were parsed above into variables
     [[ "$include_root" == "true" ]] || return 1
     [[ "$depth" == "infinite" ]] || return 1
