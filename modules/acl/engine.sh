@@ -1635,7 +1635,9 @@ apply_all_rules() {
     local total_rule_failures=0
     for ((i=0; i<rules_count; i++)); do
         log_bold "---------- PROCESSING RULE $((i+1)) ------------"
-        if ! execute_rule "$i"; then
+        execute_rule "$i"
+        local rule_rc=$?
+        if [[ $rule_rc -ne 0 && $rule_rc -ne $RETURN_SKIPPED ]]; then
             ((total_rule_failures++))
         fi
     done
