@@ -160,25 +160,69 @@ declare -A cache_types=()
 # Cache service interface
 cache_get() {
     local -r cache_type="$1" key="$2"
-    local -n cache_ref="cache_${cache_type}"
-    if [[ -n "${cache_ref[$key]:-}" ]]; then
-        RUNTIME_STATE[cache_hits]=$((${RUNTIME_STATE[cache_hits]} + 1))
-        echo "${cache_ref[$key]}"
-        return 0
-    fi
+    case "$cache_type" in
+        rules)
+            if [[ ${cache_rules[$key]+_} ]]; then
+                RUNTIME_STATE[cache_hits]=$((${RUNTIME_STATE[cache_hits]} + 1))
+                printf '%s\n' "${cache_rules[$key]}"
+                return 0
+            fi
+            ;;
+        groups)
+            if [[ ${cache_groups[$key]+_} ]]; then
+                RUNTIME_STATE[cache_hits]=$((${RUNTIME_STATE[cache_hits]} + 1))
+                printf '%s\n' "${cache_groups[$key]}"
+                return 0
+            fi
+            ;;
+        types)
+            if [[ ${cache_types[$key]+_} ]]; then
+                RUNTIME_STATE[cache_hits]=$((${RUNTIME_STATE[cache_hits]} + 1))
+                printf '%s\n' "${cache_types[$key]}"
+                return 0
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
     return 1
 }
 
 cache_set() {
     local -r cache_type="$1" key="$2" value="$3"
-    local -n cache_ref="cache_${cache_type}"
-    cache_ref[$key]="$value"
+    case "$cache_type" in
+        rules)
+            cache_rules[$key]="$value"
+            ;;
+        groups)
+            cache_groups[$key]="$value"
+            ;;
+        types)
+            cache_types[$key]="$value"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 cache_clear() {
     local -r cache_type="$1"
-    local -n cache_ref="cache_${cache_type}"
-    cache_ref=()
+    case "$cache_type" in
+        rules)
+            cache_rules=()
+            ;;
+        groups)
+            cache_groups=()
+            ;;
+        types)
+            cache_types=()
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 # Efficient rule data caching - consolidates all jq calls into one pass
@@ -218,7 +262,12 @@ cache_all_rules() {
 
     # Parse and cache the structured data
     local rules_count="0" apply_order="shallow_to_deep"
-    while IFS='|' read -r -a parts; do
+    local sentinel='__CACHE_SENTINEL__'
+    local line
+    while IFS= read -r line; do
+        local -a parts=()
+        IFS='|' read -r -a parts <<< "${line}|${sentinel}"
+        unset "parts[${#parts[@]}-1]"
         [[ ${#parts[@]} -gt 0 ]] || continue
         case "${parts[0]}" in
             apply_order) apply_order="${parts[1]}" ;;
