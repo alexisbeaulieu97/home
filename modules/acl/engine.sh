@@ -161,9 +161,9 @@ declare -A cache_types=()
 cache_get() {
     local -r cache_type="$1" key="$2"
     local -n cache_ref="cache_${cache_type}"
-    if [[ -n "${cache_ref[$key]:-}" ]]; then
+    if [[ ${cache_ref[$key]+_} ]]; then
         RUNTIME_STATE[cache_hits]=$((${RUNTIME_STATE[cache_hits]} + 1))
-        echo "${cache_ref[$key]}"
+        printf '%s\n' "${cache_ref[$key]}"
         return 0
     fi
     return 1
@@ -218,7 +218,12 @@ cache_all_rules() {
 
     # Parse and cache the structured data
     local rules_count="0" apply_order="shallow_to_deep"
-    while IFS='|' read -r -a parts; do
+    local sentinel='__CACHE_SENTINEL__'
+    local line
+    while IFS= read -r line; do
+        local -a parts=()
+        IFS='|' read -r -a parts <<< "${line}|${sentinel}"
+        unset "parts[${#parts[@]}-1]"
         [[ ${#parts[@]} -gt 0 ]] || continue
         case "${parts[0]}" in
             apply_order) apply_order="${parts[1]}" ;;
