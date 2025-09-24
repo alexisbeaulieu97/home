@@ -1119,6 +1119,46 @@ can_use_recursive_optimization() {
     return 0
 }
 
+# Specialized check for default ACL recursive optimization
+can_use_default_recursive_optimization() {
+    local -r rule_idx="$1"
+
+    [[ "${CONFIG[recursive_optimization]}" == "true" ]] || return 1
+
+    if [[ ${#target_paths[@]} -gt 0 ]]; then
+        return 1
+    fi
+
+    local params
+    params=$(get_rule_params "$rule_idx")
+    [[ -n "$params" ]] || return 1
+
+    local include_root depth types_csv pattern_syntax match_base case_sensitive
+    IFS=$'\t' read -r include_root depth types_csv pattern_syntax match_base case_sensitive <<< "$params"
+
+    [[ "$include_root" == "true" ]] || return 1
+    [[ "$depth" == "infinite" ]] || return 1
+
+    local includes excludes
+    includes=$(get_rule_data "$rule_idx" "includes")
+    excludes=$(get_rule_data "$rule_idx" "excludes")
+    [[ -z "$includes" && -z "$excludes" ]] || return 1
+
+    local def_specs_data
+    def_specs_data=$(get_rule_data "$rule_idx" "def_specs")
+    [[ -n "$def_specs_data" ]] || return 1
+
+    local want_dirs=0
+    if [[ -z "$types_csv" || "$types_csv" == "," ]]; then
+        want_dirs=1
+    else
+        [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
+    fi
+    [[ $want_dirs -eq 1 ]] || return 1
+
+    return 0
+}
+
 # Simplified path enumeration for recursive rules
 enumerate_paths_simple() {
     # Args (new semantics): include_root depth types_csv pattern_syntax match_base case_sensitive  -- roots...
@@ -1240,6 +1280,15 @@ execute_rule() {
         strategy="direct_recursive"
         RUNTIME_STATE[optimized_rules]=$((${RUNTIME_STATE[optimized_rules]} + 1))
         log_info "Using direct recursive optimization"
+    fi
+
+    local use_default_recursive=0
+    if [[ ${#def_specs[@]} -gt 0 ]] && can_use_default_recursive_optimization "$rule_idx"; then
+        use_default_recursive=1
+        if [[ "$strategy" != "direct_recursive" ]]; then
+            RUNTIME_STATE[optimized_rules]=$((${RUNTIME_STATE[optimized_rules]} + 1))
+            log_info "Using direct recursive optimization for default ACLs"
+        fi
     fi
 
     local rule_failed=0
@@ -1370,48 +1419,54 @@ execute_rule() {
 
         # Apply default specs to directories, but only if directories are targeted by types
         if [[ ${#def_specs[@]} -gt 0 && $want_dirs -eq 1 ]]; then
-            local -a paths
-            log_progress "Enumerating paths for default ACL processing..."
-            mapfile -t paths < <(enumerate_paths_simple "$include_root" "$depth" "$root")
-            local -a ordered_paths=()
-            while IFS= read -r p; do ordered_paths+=("$p"); done < <(sort_paths_by_apply_order "$(cache_get rules "apply_order")" "$root" "${paths[@]}")
-            local default_dir_count=0
-            for path in "${ordered_paths[@]}"; do
-                # Ensure root is excluded when include_root is false
-                if [[ "$include_root" != "true" && "$path" == "$root" ]]; then
-                    continue
-                fi
-                if ! path_under_any_filter "$path"; then
-                    RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
-                    continue
-                fi
-                if ! path_matches_rule_filters "$rule_idx" "$path"; then
-                    RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
-                    continue
-                fi
-                [[ -d "$path" ]] || continue
-                ((default_dir_count++))
-            done
-            if [[ $default_dir_count -gt 0 ]]; then
-                log_progress "Processing default ACLs for $default_dir_count directories individually..."
-            fi
-
-            # Reset bulk operations counter for this section
-            RUNTIME_STATE[bulk_operations]=0
-            for path in "${ordered_paths[@]}"; do
-                if ! path_under_any_filter "$path"; then
-                    RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
-                    continue
-                fi
-                if ! path_matches_rule_filters "$rule_idx" "$path"; then
-                    RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
-                    continue
-                fi
-                [[ -d "$path" ]] || continue
-                if ! apply_acl_strategy "individual" "$path" "true" "${def_specs[@]}"; then
+            if [[ $use_default_recursive -eq 1 ]]; then
+                if ! apply_acl_strategy "direct_recursive" "$root" "true" "${def_specs[@]}"; then
                     root_failed=1
                 fi
-            done
+            else
+                local -a paths
+                log_progress "Enumerating paths for default ACL processing..."
+                mapfile -t paths < <(enumerate_paths_simple "$include_root" "$depth" "$root")
+                local -a ordered_paths=()
+                while IFS= read -r p; do ordered_paths+=("$p"); done < <(sort_paths_by_apply_order "$(cache_get rules "apply_order")" "$root" "${paths[@]}")
+                local default_dir_count=0
+                for path in "${ordered_paths[@]}"; do
+                    # Ensure root is excluded when include_root is false
+                    if [[ "$include_root" != "true" && "$path" == "$root" ]]; then
+                        continue
+                    fi
+                    if ! path_under_any_filter "$path"; then
+                        RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
+                        continue
+                    fi
+                    if ! path_matches_rule_filters "$rule_idx" "$path"; then
+                        RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
+                        continue
+                    fi
+                    [[ -d "$path" ]] || continue
+                    ((default_dir_count++))
+                done
+                if [[ $default_dir_count -gt 0 ]]; then
+                    log_progress "Processing default ACLs for $default_dir_count directories individually..."
+                fi
+
+                # Reset bulk operations counter for this section
+                RUNTIME_STATE[bulk_operations]=0
+                for path in "${ordered_paths[@]}"; do
+                    if ! path_under_any_filter "$path"; then
+                        RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
+                        continue
+                    fi
+                    if ! path_matches_rule_filters "$rule_idx" "$path"; then
+                        RUNTIME_STATE[total_skipped]=$((${RUNTIME_STATE[total_skipped]} + 1))
+                        continue
+                    fi
+                    [[ -d "$path" ]] || continue
+                    if ! apply_acl_strategy "individual" "$path" "true" "${def_specs[@]}"; then
+                        root_failed=1
+                    fi
+                done
+            fi
         fi
 
         if [[ $root_failed -eq 0 ]]; then
