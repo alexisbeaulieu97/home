@@ -511,6 +511,64 @@ is_valid_group()   { [[ "$1" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]]; }
 is_valid_perms()   { [[ "$1" =~ ^[rwxX-]{1,4}$ ]]; }
 is_valid_mask()    { [[ "$1" =~ ^[rwx-]{1,3}$ ]]; }
 
+normalize_target_path() {
+    local input="$1"
+    [[ -n "$input" ]] || return 1
+
+    while [[ "$input" == */ && "$input" != "/" ]]; do
+        input=${input%/}
+    done
+    [[ -n "$input" ]] || input="/"
+
+    local base path
+    if [[ "$input" == /* ]]; then
+        base="/"
+        path="${input#/}"
+    else
+        base="$PWD"
+        while [[ "$base" == */ && "$base" != "/" ]]; do
+            base=${base%/}
+        done
+        path="$input"
+    fi
+
+    local -a stack=()
+    if [[ "$base" != "/" ]]; then
+        local IFS='/'
+        read -r -a stack <<< "${base#/}"
+    fi
+
+    local IFS='/'
+    local -a components=()
+    read -r -a components <<< "$path"
+
+    local component
+    for component in "${components[@]}"; do
+        case "$component" in
+            ''|'.')
+                continue
+                ;;
+            '..')
+                if ((${#stack[@]} > 0)); then
+                    unset 'stack[${#stack[@]}-1]'
+                else
+                    continue
+                fi
+                ;;
+            *)
+                stack+=("$component")
+                ;;
+        esac
+    done
+
+    local normalized="/"
+    if ((${#stack[@]} > 0)); then
+        local IFS='/'
+        normalized+=$(printf '%s' "${stack[*]}")
+    fi
+    printf '%s\n' "$normalized"
+}
+
 # Complex validation functions
 validate_definitions_file() {
     local -r file="${CONFIG[definitions_file]}"
@@ -1613,7 +1671,19 @@ parse_arguments() {
         esac
     done
 
-    target_paths=("$@")
+    if (($# > 0)); then
+        local normalized_path
+        local -a normalized_targets=()
+        for target in "$@"; do
+            if ! normalized_path=$(normalize_target_path "$target"); then
+                fail "$EXIT_INVALID_ARGS" "Failed to normalize target path: '$target'"
+            fi
+            normalized_targets+=("$normalized_path")
+        done
+        target_paths=("${normalized_targets[@]}")
+    else
+        target_paths=()
+    fi
 }
 
 # =============================================================================
