@@ -88,7 +88,7 @@ test_is_valid_path() {
     
     # Test invalid paths
     assert_command_fails "empty path should be invalid" is_valid_path ""
-    assert_command_fails "null character should be invalid" is_valid_path $'/tmp/test\0'
+    assert_command_fails "path with newline should be invalid" is_valid_path $'multi\nline'
 }
 
 test_is_valid_group() {
