@@ -569,6 +569,95 @@ normalize_target_path() {
     printf '%s\n' "$normalized"
 }
 
+trim_trailing_slashes() {
+    local path="$1"
+    [[ -n "$path" ]] || path="/"
+    while [[ "$path" != "/" && "$path" == */ ]]; do
+        path="${path%/}"
+    done
+    [[ -n "$path" ]] || path="/"
+    printf '%s\n' "$path"
+}
+
+path_is_descendant_of() {
+    local child parent
+    child=$(trim_trailing_slashes "$1")
+    parent=$(trim_trailing_slashes "$2")
+    [[ -n "$child" ]] || child="/"
+    [[ -n "$parent" ]] || parent="/"
+    if [[ "$parent" == "/" ]]; then
+        return 0
+    fi
+    if [[ "$child" == "$parent" ]]; then
+        return 0
+    fi
+    [[ "$child" == "$parent"/* ]]
+}
+
+collect_scoped_roots() {
+    local -a input_roots=("$@")
+    local -a collected=()
+    local -A added=()
+    local -A missing_reported=()
+    local -a missing_paths=()
+
+    local root normalized_root
+    for root in "${input_roots[@]}"; do
+        [[ -n "$root" ]] || continue
+        if ! normalized_root=$(normalize_target_path "$root" 2>/dev/null); then
+            continue
+        fi
+        [[ -e "$normalized_root" ]] || continue
+
+        if [[ ${#target_paths[@]} -eq 0 ]]; then
+            if [[ -z ${added[$normalized_root]+x} ]]; then
+                collected+=("$normalized_root")
+                added[$normalized_root]=1
+            fi
+            continue
+        fi
+
+        local filter has_cover=0
+        for filter in "${target_paths[@]}"; do
+            if path_is_descendant_of "$normalized_root" "$filter"; then
+                has_cover=1
+                break
+            fi
+        done
+        if (( has_cover )); then
+            if [[ -z ${added[$normalized_root]+x} ]]; then
+                collected+=("$normalized_root")
+                added[$normalized_root]=1
+            fi
+        fi
+
+        for filter in "${target_paths[@]}"; do
+            if path_is_descendant_of "$filter" "$normalized_root"; then
+                if [[ -e "$filter" ]]; then
+                    if [[ -z ${added[$filter]+x} ]]; then
+                        collected+=("$filter")
+                        added[$filter]=1
+                    fi
+                else
+                    if [[ -z ${missing_reported[$filter]+x} ]]; then
+                        missing_paths+=("$filter")
+                        missing_reported[$filter]=1
+                    fi
+                fi
+            fi
+        done
+    done
+
+    if [[ ${#missing_paths[@]} -gt 0 ]]; then
+        log_warning "Target paths skipped because they do not exist: ${missing_paths[*]}"
+    fi
+
+    local scoped
+    for scoped in "${collected[@]}"; do
+        printf '%s\n' "$scoped"
+    done
+}
+
 # Complex validation functions
 validate_definitions_file() {
     local -r file="${CONFIG[definitions_file]}"
@@ -715,8 +804,9 @@ path_under_any_filter() {
     local -r path="$1"
     [[ ${#target_paths[@]} -eq 0 ]] && return 0
 
+    local filter
     for filter in "${target_paths[@]}"; do
-        if [[ "$path" == "$filter" || "$path" == "$filter"/* ]]; then
+        if path_is_descendant_of "$path" "$filter"; then
             return 0
         fi
     done
@@ -731,12 +821,10 @@ path_intersects_any_filter() {
     [[ ${#target_paths[@]} -eq 0 ]] && return 0
     local filter
     for filter in "${target_paths[@]}"; do
-        # path contains filter
-        if [[ "$filter" == "$path" || "$filter" == "$path"/* ]]; then
+        if path_is_descendant_of "$path" "$filter"; then
             return 0
         fi
-        # path is contained by filter
-        if [[ "$path" == "$filter" || "$path" == "$filter"/* ]]; then
+        if path_is_descendant_of "$filter" "$path"; then
             return 0
         fi
     done
@@ -1170,13 +1258,21 @@ apply_strategy_individual() {
 # Rule analysis service
 can_use_recursive_optimization() {
     local -r rule_idx="$1"
+    local root_path="${2:-}"
 
     # Disabled by configuration
     [[ "${CONFIG[recursive_optimization]}" == "true" ]] || return 1
 
-    # If user provided target path filters, avoid -R; we need per-path filtering
     if [[ ${#target_paths[@]} -gt 0 ]]; then
-        return 1
+        [[ -n "$root_path" ]] || return 1
+        local filter has_cover=0
+        for filter in "${target_paths[@]}"; do
+            if path_is_descendant_of "$root_path" "$filter"; then
+                has_cover=1
+                break
+            fi
+        done
+        [[ $has_cover -eq 1 ]] || return 1
     fi
 
     # Get rule parameters
@@ -1316,10 +1412,9 @@ execute_rule() {
 
     # Filter valid roots
     local -a valid_roots=()
-    for root in "${roots[@]}"; do
-        [[ -n "$root" && -e "$root" ]] || continue
-        path_under_any_filter "$root" && valid_roots+=("$root")
-    done
+    if [[ ${#roots[@]} -gt 0 ]]; then
+        mapfile -t valid_roots < <(collect_scoped_roots "${roots[@]}")
+    fi
 
     [[ ${#valid_roots[@]} -gt 0 ]] || {
         log_info "No valid roots for rule $((rule_idx + 1))"
@@ -1344,15 +1439,8 @@ execute_rule() {
         [[ ",${types_csv}," == *,directory,* ]] && want_dirs=1
     fi
 
-    # Choose strategy
-    local strategy="individual"
-    if can_use_recursive_optimization "$rule_idx"; then
-        strategy="direct_recursive"
-        RUNTIME_STATE[optimized_rules]=$((${RUNTIME_STATE[optimized_rules]} + 1))
-        log_info "Using direct recursive optimization"
-    fi
-
     local rule_failed=0
+    local rule_used_recursive=0
 
     local apply_order_cached
     if ! apply_order_cached=$(cache_get rules "apply_order" 2>/dev/null); then
@@ -1362,6 +1450,15 @@ execute_rule() {
     # Apply strategy to roots
     for root in "${valid_roots[@]}"; do
         local root_failed=0
+        local strategy="individual"
+        if can_use_recursive_optimization "$rule_idx" "$root"; then
+            strategy="direct_recursive"
+            if [[ $rule_used_recursive -eq 0 ]]; then
+                rule_used_recursive=1
+                RUNTIME_STATE[optimized_rules]=$((${RUNTIME_STATE[optimized_rules]} + 1))
+                log_info "Using direct recursive optimization"
+            fi
+        fi
 
         # Short-circuit root if it doesn't intersect requested targets
         if ! path_intersects_any_filter "$root"; then
