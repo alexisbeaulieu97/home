@@ -1,14 +1,3 @@
-Excellent, let's finalize the command.
-
-Based on recent prompting guides for advanced models like GPT-5-Codex, the core principle is "less is more." These models have many best practices built-in, and overly prescriptive prompts can sometimes reduce the quality of the output. The goal is to provide high-level, clear instructions and trust the model's specialized training.
-
-This final version is refined to be as generic and powerful as possible, aligning with these advanced prompting strategies.
-
-### The Generic, Reusable Command for Code Architecture Audits
-
-This command is designed to be used "as-is." You would provide the entire codebase as the context for this prompt.
-
-```
 Act as an expert software architect.
 
 You will be provided with a codebase for a software project. Your task is to conduct a thorough audit of its architecture. Your goal is to provide actionable insights to improve its overall quality, maintainability, scalability, and security.
@@ -58,12 +47,3 @@ For each significant area you identify as needing improvement, provide a "Transf
 
 **Filtering Rule:**
 Crucially, only include suggestions with a **Confidence Score of 80% or higher.**
-```
-
-### Why This Version Aligns with Best Practices:
-*   **Minimalist & High-Level:** The introduction is direct and avoids fluff. The checklist is presented as a "mental model" rather than a rigid set of instructions, respecting the model's built-in expertise.
-*   **Clear Role and Goal:** It starts by assigning a persona ("expert software architect") and stating a clear objective. This is a fundamental best practice.
-*   **Structured for Clarity:** The use of Markdown headers and bullet points clearly separates the different parts of the request (Goal, Checklist, Output Format, Rule). This helps the model parse the instructions accurately.
-*   **Action-Oriented & Structured Output:** It explicitly defines the desired output format, which is critical for getting consistent, usable results.
-*   **Self-Correction Mechanism:** The confidence score and filtering rule are advanced techniques that force the model to perform a self-assessment, significantly improving the quality and relevance of the final suggestions.
-*   **Generic and Reusable:** By removing all project-specific placeholders, this command can be saved and applied to any codebase by simply providing the code as context.
