@@ -1,0 +1,9 @@
+id: "setup-claude-code"
+name: "Claude Code Setup"
+version: "1.0"
+dependencies:
+  - "setup-pnpm@1.0"
+steps:
+  - id: "install_claude"
+    type: "command"
+    command: "pnpm install -g @anthropic-ai/claude-code@latest"

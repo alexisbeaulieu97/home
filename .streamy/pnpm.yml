@@ -1,0 +1,10 @@
+id: "setup-pnpm"
+name: "PNPM Setup"
+version: "1.0"
+steps:
+  - id: "install_pnpm"
+    type: "command"
+    command: "curl -fsSL https://get.pnpm.io/install.sh | sh -"
+validations:
+  - type: "command"
+    command: "which pnpm"

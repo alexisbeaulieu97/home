@@ -1,0 +1,9 @@
+id: "setup-claude-code-configs"
+name: "Claude Code Configs Setup"
+version: "1.0"
+dependencies:
+  - "setup-claude-code@1.0"
+steps:
+  - id: "install_claude_code_configs"
+    type: "command"
+    command: ""
