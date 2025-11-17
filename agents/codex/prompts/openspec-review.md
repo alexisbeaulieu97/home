@@ -1,1 +1,0 @@
-../../commands/openspec/review.md
